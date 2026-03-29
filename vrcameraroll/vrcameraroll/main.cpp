@@ -147,6 +147,9 @@ int main() {
         return 1;
     }
 
+    // Input 2.0 はオーバーレイアプリでは VRChat fg 時に bActive=0 になるため不使用。
+    // 代わりに GetDeviceToAbsoluteTrackingPose でポーズを直接取得する。
+
     constexpr int N = ImageCollection::N;
 
     // ── 画像オーバーレイ (N枚) ──
@@ -177,11 +180,12 @@ int main() {
     }
 
     // サブ画像にマウス入力を有効化 (クリックでメイン切り替え)
+    // MakeOverlaysInteractiveIfVisible は動的切り替えするため初期値 false
     for (int i = 1; i < N; ++i) {
         vr::HmdVector2_t ms = { 64.f, 64.f };
         vr::VROverlay()->SetOverlayInputMethod(img_overlays[i], vr::VROverlayInputMethod_Mouse);
         vr::VROverlay()->SetOverlayMouseScale(img_overlays[i], &ms);
-        vr::VROverlay()->SetOverlayFlag(img_overlays[i], vr::VROverlayFlags_MakeOverlaysInteractiveIfVisible, true);
+        vr::VROverlay()->SetOverlayFlag(img_overlays[i], vr::VROverlayFlags_MakeOverlaysInteractiveIfVisible, false);
         vr::VROverlay()->SetOverlayFlag(img_overlays[i], vr::VROverlayFlags_EnableClickStabilization, true);
     }
 
@@ -207,8 +211,8 @@ int main() {
     vr::VROverlay()->SetOverlayInputMethod(btn_older, vr::VROverlayInputMethod_Mouse);
     vr::VROverlay()->SetOverlayMouseScale(btn_newer, &btn_ms);
     vr::VROverlay()->SetOverlayMouseScale(btn_older, &btn_ms);
-    vr::VROverlay()->SetOverlayFlag(btn_newer, vr::VROverlayFlags_MakeOverlaysInteractiveIfVisible, true);
-    vr::VROverlay()->SetOverlayFlag(btn_older, vr::VROverlayFlags_MakeOverlaysInteractiveIfVisible, true);
+    vr::VROverlay()->SetOverlayFlag(btn_newer, vr::VROverlayFlags_MakeOverlaysInteractiveIfVisible, false);
+    vr::VROverlay()->SetOverlayFlag(btn_older, vr::VROverlayFlags_MakeOverlaysInteractiveIfVisible, false);
     vr::VROverlay()->SetOverlayFlag(btn_newer, vr::VROverlayFlags_EnableClickStabilization, true);
     vr::VROverlay()->SetOverlayFlag(btn_older, vr::VROverlayFlags_EnableClickStabilization, true);
 
@@ -222,6 +226,9 @@ int main() {
     img_layout[0].y = CalcMainCenterY(SUB_Y, SUB_W, MAIN_W, collection.Main());
 
     printf("Loaded %d image(s). Press Enter to exit.\n", collection.LoadedCount());
+
+    int dbg_frame = 0;
+    bool prev_any_hit = false;
 
     while (true) {
         if (GetAsyncKeyState(VK_RETURN) & 0x8000) break;
@@ -239,6 +246,74 @@ int main() {
             auto t_older = MakeTransform(BTN_R_X, SUB_Y, 0.0f);
             vr::VROverlay()->SetOverlayTransformTrackedDeviceRelative(btn_newer, left_hand, &t_newer);
             vr::VROverlay()->SetOverlayTransformTrackedDeviceRelative(btn_older, left_hand, &t_older);
+        }
+
+        // 右コントローラーの raw pose を取得 (Input 2.0 不要、常時動作)
+        vr::TrackedDevicePose_t poses[vr::k_unMaxTrackedDeviceCount];
+        vr_system->GetDeviceToAbsoluteTrackingPose(
+            vr::TrackingUniverseStanding, 0.0f, poses, vr::k_unMaxTrackedDeviceCount);
+
+        vr::TrackedDeviceIndex_t right_hand =
+            vr_system->GetTrackedDeviceIndexForControllerRole(vr::TrackedControllerRole_RightHand);
+
+        const bool right_valid = (right_hand != vr::k_unTrackedDeviceIndexInvalid)
+                               && poses[right_hand].bPoseIsValid;
+
+#ifdef _DEBUG
+        // ComputeOverlayIntersection の動作確認 (60フレームに1回)
+        if (++dbg_frame % 60 == 0) {
+            if (right_valid) {
+                auto& m = poses[right_hand].mDeviceToAbsoluteTracking.m;
+                vr::VROverlayIntersectionParams_t params;
+                params.eOrigin    = vr::TrackingUniverseStanding;
+                params.vSource    = { m[0][3], m[1][3], m[2][3] };
+                params.vDirection = { m[0][2], m[1][2], m[2][2] }; // raw pose の -Z
+
+                vr::VROverlayIntersectionResults_t res;
+                bool hit_btn = vr::VROverlay()->ComputeOverlayIntersection(btn_newer, &params, &res);
+                bool hit_sub = vr::VROverlay()->ComputeOverlayIntersection(img_overlays[1], &params, &res);
+                // 左手位置（オーバーレイの親）も出力
+                vr::TrackedDeviceIndex_t lh =
+                    vr_system->GetTrackedDeviceIndexForControllerRole(vr::TrackedControllerRole_LeftHand);
+                float lx=0,ly=0,lz=0;
+                if (lh != vr::k_unTrackedDeviceIndexInvalid && poses[lh].bPoseIsValid) {
+                    auto& lm = poses[lh].mDeviceToAbsoluteTracking.m;
+                    lx=lm[0][3]; ly=lm[1][3]; lz=lm[2][3];
+                }
+                printf("[DBG] right src=(%.2f,%.2f,%.2f) dir=(%.2f,%.2f,%.2f)\n",
+                    m[0][3], m[1][3], m[2][3], m[0][2], m[1][2], m[2][2]);
+                printf("[DBG] left  pos=(%.2f,%.2f,%.2f)\n", lx, ly, lz);
+                printf("[DBG] hit_btn_newer=%d  hit_sub[1]=%d  dist=%.3f\n",
+                    hit_btn, hit_sub, (hit_btn || hit_sub) ? res.fDistance : -1.f);
+            } else {
+                printf("[DBG] right_hand=%u valid=%d\n", right_hand, right_valid);
+            }
+        }
+#endif
+
+        // ── 動的 MakeOverlaysInteractiveIfVisible 切り替え ──
+        // 右コントローラーのレイがいずれかの overlay にヒットした瞬間だけ true にする
+        bool any_hit = false;
+        if (right_valid) {
+            auto& m = poses[right_hand].mDeviceToAbsoluteTracking.m;
+            vr::VROverlayIntersectionParams_t params;
+            params.eOrigin    = vr::TrackingUniverseStanding;
+            params.vSource    = { m[0][3], m[1][3], m[2][3] };
+            params.vDirection = { m[0][2], m[1][2], m[2][2] };
+
+            vr::VROverlayIntersectionResults_t res;
+            if (vr::VROverlay()->ComputeOverlayIntersection(btn_newer, &params, &res)) any_hit = true;
+            if (!any_hit && vr::VROverlay()->ComputeOverlayIntersection(btn_older, &params, &res)) any_hit = true;
+            for (int i = 1; i < N && !any_hit; ++i) {
+                if (vr::VROverlay()->ComputeOverlayIntersection(img_overlays[i], &params, &res)) any_hit = true;
+            }
+        }
+        if (any_hit != prev_any_hit) {
+            vr::VROverlay()->SetOverlayFlag(btn_newer, vr::VROverlayFlags_MakeOverlaysInteractiveIfVisible, any_hit);
+            vr::VROverlay()->SetOverlayFlag(btn_older, vr::VROverlayFlags_MakeOverlaysInteractiveIfVisible, any_hit);
+            for (int i = 1; i < N; ++i)
+                vr::VROverlay()->SetOverlayFlag(img_overlays[i], vr::VROverlayFlags_MakeOverlaysInteractiveIfVisible, any_hit);
+            prev_any_hit = any_hit;
         }
 
         // ── イベント処理 ──

@@ -1,0 +1,10 @@
+{
+  "controller_type": "knuckles",
+  "bindings": {
+    "/actions/camera_roll": {
+      "poses": [
+        { "output": "/actions/camera_roll/in/right_aim", "path": "/user/hand/right/input/aim" }
+      ]
+    }
+  }
+}

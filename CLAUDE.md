@@ -75,3 +75,24 @@ SteamVROverlay/
 - SteamVRが起動していない場合は `vr::VR_Init()` が失敗する。起動待ちループを実装すること
 - オーバーレイのテクスチャサイズは2のべき乗にする（パフォーマンス上の推奨）
 - VRChatのスクリーンショットフォルダはデフォルト: `%USERPROFILE%\Pictures\VRChat`
+
+## VRChat AFK 問題と今後の入力方針
+
+### 問題
+`VROverlayFlags_MakeOverlaysInteractiveIfVisible` を常時 ON にすると、SteamVR がシステム全体のレーザーマウスモードを有効化し、VRChat が「ダッシュボード開放中」と同等の状態と見なして AFK 判定される。
+
+### 目標挙動（XSOverlay 参考）
+- **通常時**: `MakeOverlaysInteractiveIfVisible = false` → VRChat への入力は通常通り、AFK なし
+- **右コントローラーのレイが overlay にヒットした瞬間**: 動的に `true` に切り替え → SteamVR がレーザーを表示 & トリガー検出を肩代わり
+- **レイが外れたら**: 即座に `false` に戻す
+
+### 実装前提条件
+上記を実現するには **`ComputeOverlayIntersection` が正しく動作すること** が必要。
+現在デバッグ中（`#ifdef _DEBUG` ブロックで毎秒ログ出力）。
+
+### `ComputeOverlayIntersection` 動作確認チェックリスト
+1. `pose_valid=1` になっているか（右コントローラーのトラッキングが有効か）
+2. `src` 座標がリアルなワールド座標か（数メートル以内の値）
+3. `dir` ベクトルが正規化されているか（各成分が -1〜1 の範囲）
+4. hit が `true` になるか（コントローラーをボタンに正対させた状態で）
+5. もし hit しない場合: コントローラーの forward ベクトルが `-m[*][2]` で正しいか、`+m[*][2]` を試す
