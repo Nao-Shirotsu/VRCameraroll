@@ -3,5 +3,5 @@
     <Platform Name="x64" />
     <Platform Name="x86" />
   </Configurations>
-  <Project Path="vrcameraroll/vrcameraroll.vcxproj" />
+  <Project Path="vrcameraroll/vrcameraroll.vcxproj" Id="7fbd0fcc-4207-47fd-bd76-eb257087cd96" />
 </Solution>
