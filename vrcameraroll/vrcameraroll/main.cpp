@@ -1,4 +1,5 @@
 #pragma execution_character_set("utf-8")
+#define LASER_UI
 #include <openvr.h>
 #include <Windows.h>
 #include <cstdio>
@@ -55,6 +56,8 @@ static const GlyphDef kFont[] = {
     {'y', {0x9, 0x9, 0x7, 0x1, 0xE}},  // 1001 1001 0111 0001 1110
     {'z', {0xF, 0x1, 0x6, 0x8, 0xF}},  // 1111 0001 0110 1000 1111
     {'T', {0xF, 0x6, 0x6, 0x6, 0x6}},  // 1111 0110 0110 0110 0110
+    {'C', {0xE, 0x8, 0x8, 0x8, 0xE}},  // 1110 1000 1000 1000 1110
+    {'o', {0x6, 0x9, 0x9, 0x9, 0x6}},  // 0110 1001 1001 1001 0110
 };
 
 static void DrawGlyph(std::vector<uint8_t>& pixels, int S,
@@ -79,6 +82,23 @@ static void DrawGlyph(std::vector<uint8_t>& pixels, int S,
         }
         return;
     }
+}
+
+// 64x64 ラベルのみボタンテクスチャ（矢印なし、ラベル中央揃え）
+static std::vector<uint8_t> MakeLabelTexture(const char* label,
+    uint8_t bg_r = 60, uint8_t bg_g = 100, uint8_t bg_b = 60)
+{
+    constexpr int S = 64, scale = 2, char_w = 4*scale, gap = 2;
+    std::vector<uint8_t> pixels(S * S * 4);
+    for (int i = 0; i < S * S; ++i) {
+        pixels[i*4+0]=bg_r; pixels[i*4+1]=bg_g; pixels[i*4+2]=bg_b; pixels[i*4+3]=180;
+    }
+    int n = (int)strlen(label);
+    int lx = (S - (n*char_w + (n-1)*gap)) / 2;
+    int ly = (S - 5*scale) / 2;
+    for (int i = 0; i < n; ++i)
+        DrawGlyph(pixels, S, lx + i*(char_w+gap), ly, label[i], scale);
+    return pixels;
 }
 
 // 64x64 矢印テクスチャ。label が非空なら下部にラベル描画。
@@ -122,12 +142,59 @@ static std::vector<uint8_t> MakeArrowTexture(bool left_arrow, const char* label 
     return pixels;
 }
 
+// 4x256 px の単色ライン用テクスチャ（赤/半透明）
+static std::vector<uint8_t> MakePointerTexture() {
+    constexpr int W = 4, H = 256;
+    std::vector<uint8_t> pixels(W * H * 4);
+    for (int i = 0; i < W * H; ++i) {
+        pixels[i*4+0] = 255; pixels[i*4+1] = 60;
+        pixels[i*4+2] = 60;  pixels[i*4+3] = 220;
+    }
+    return pixels;
+}
+
 static void UploadGrey(vr::VROverlayHandle_t overlay) {
     static uint8_t grey[64 * 64 * 4];
     static bool init = false;
     if (!init) { memset(grey, 128, sizeof(grey)); init = true; }
     vr::VROverlay()->SetOverlayRaw(overlay, grey, 64, 64, 4);
 }
+
+// ────────────────────────────────────────────
+// 3x3 回転行列（ポインターラインのローカル軸回転用）
+// ────────────────────────────────────────────
+struct Mat3 {
+    float m[3][3] = {};
+    static Mat3 identity() {
+        Mat3 r; r.m[0][0]=r.m[1][1]=r.m[2][2]=1.f; return r;
+    }
+    static Mat3 rotX(float a) {
+        Mat3 r = identity();
+        r.m[1][1]= cosf(a); r.m[1][2]=-sinf(a);
+        r.m[2][1]= sinf(a); r.m[2][2]= cosf(a);
+        return r;
+    }
+    static Mat3 rotY(float a) {
+        Mat3 r = identity();
+        r.m[0][0]= cosf(a); r.m[0][2]= sinf(a);
+        r.m[2][0]=-sinf(a); r.m[2][2]= cosf(a);
+        return r;
+    }
+    static Mat3 rotZ(float a) {
+        Mat3 r = identity();
+        r.m[0][0]= cosf(a); r.m[0][1]=-sinf(a);
+        r.m[1][0]= sinf(a); r.m[1][1]= cosf(a);
+        return r;
+    }
+    Mat3 operator*(const Mat3& o) const {
+        Mat3 r;
+        for (int i = 0; i < 3; ++i)
+            for (int j = 0; j < 3; ++j)
+                for (int k = 0; k < 3; ++k)
+                    r.m[i][j] += m[i][k] * o.m[k][j];
+        return r;
+    }
+};
 
 // ────────────────────────────────────────────
 // トランスフォーム計算
@@ -209,7 +276,6 @@ int main() {
     vr::EVRInitError err = vr::VRInitError_None;
     vr::IVRSystem* vr_system = vr::VR_Init(&err, vr::VRApplication_Overlay);
     if (err != vr::VRInitError_None) {
-        printf("VR_Init failed: %s\n", vr::VR_GetVRInitErrorAsEnglishDescription(err));
         return 1;
     }
 
@@ -247,13 +313,8 @@ int main() {
         vr::VROverlay()->SetOverlayWidthInMeters(img_overlays[i], img_layout[i].w);
         UploadGrey(img_overlays[i]);
     }
-    for (int i = 1; i < N; ++i) {
-        vr::HmdVector2_t ms = { 64.f, 64.f };
-        vr::VROverlay()->SetOverlayInputMethod(img_overlays[i], vr::VROverlayInputMethod_Mouse);
-        vr::VROverlay()->SetOverlayMouseScale(img_overlays[i], &ms);
-        vr::VROverlay()->SetOverlayFlag(img_overlays[i], vr::VROverlayFlags_MakeOverlaysInteractiveIfVisible, false);
-        vr::VROverlay()->SetOverlayFlag(img_overlays[i], vr::VROverlayFlags_EnableClickStabilization, true);
-    }
+    for (int i = 1; i < N; ++i)
+        vr::VROverlay()->SetOverlayInputMethod(img_overlays[i], vr::VROverlayInputMethod_None);
 
     // ── ページ送りボタン (←・→) ──
     const float BTN_W   = 0.05f;
@@ -272,15 +333,9 @@ int main() {
         vr::VROverlay()->SetOverlayRaw(btn_newer, al.data(), 64, 64, 4);
         vr::VROverlay()->SetOverlayRaw(btn_older, ar.data(), 64, 64, 4);
     }
-    {
-        vr::HmdVector2_t ms = { 64.f, 64.f };
-        for (auto h : { btn_newer, btn_older }) {
-            vr::VROverlay()->SetOverlayInputMethod(h, vr::VROverlayInputMethod_Mouse);
-            vr::VROverlay()->SetOverlayMouseScale(h, &ms);
-            vr::VROverlay()->SetOverlayFlag(h, vr::VROverlayFlags_MakeOverlaysInteractiveIfVisible, false);
-            vr::VROverlay()->SetOverlayFlag(h, vr::VROverlayFlags_EnableClickStabilization, true);
-            vr::VROverlay()->ShowOverlay(h);
-        }
+    for (auto h : { btn_newer, btn_older }) {
+        vr::VROverlay()->SetOverlayInputMethod(h, vr::VROverlayInputMethod_None);
+        vr::VROverlay()->ShowOverlay(h);
     }
 
     // ────────────────────────────────────────────
@@ -343,17 +398,67 @@ int main() {
             adj_info[i].r, adj_info[i].g, adj_info[i].b);
         vr::VROverlay()->SetOverlayRaw(adj[i], tex.data(), 64, 64, 4);
     }
-    {
-        vr::HmdVector2_t ms = { 64.f, 64.f };
-        for (int i = 0; i < 12; ++i) {
-            vr::VROverlay()->SetOverlayInputMethod(adj[i], vr::VROverlayInputMethod_Mouse);
-            vr::VROverlay()->SetOverlayMouseScale(adj[i], &ms);
-            vr::VROverlay()->SetOverlayFlag(adj[i], vr::VROverlayFlags_MakeOverlaysInteractiveIfVisible, false);
-            vr::VROverlay()->SetOverlayFlag(adj[i], vr::VROverlayFlags_EnableClickStabilization, true);
-            vr::VROverlay()->ShowOverlay(adj[i]);
-        }
+    for (int i = 0; i < 12; ++i) {
+        vr::VROverlay()->SetOverlayInputMethod(adj[i], vr::VROverlayInputMethod_None);
+        vr::VROverlay()->ShowOverlay(adj[i]);
     }
+
+#ifdef LASER_UI
+    // ── ポインターライン調整ボタン (第3・4行) ──
+    const float ADJ_ROW3_Y = ADJ_ROW2_Y - ADJ_W - ADJ_GAP; // ポインター回転
+    const float ADJ_ROW4_Y = ADJ_ROW3_Y - ADJ_W - ADJ_GAP; // ポインター移動
+
+    vr::VROverlayHandle_t ptr_adj[12];
+    const char* ptr_adj_keys[12] = {
+        "cr.prx_m","cr.prx_p","cr.pry_m","cr.pry_p","cr.prz_m","cr.prz_p",
+        "cr.ptx_m","cr.ptx_p","cr.pty_m","cr.pty_p","cr.ptz_m","cr.ptz_p",
+    };
+    const char* ptr_adj_names[12] = {
+        "PRx-","PRx+","PRy-","PRy+","PRz-","PRz+",
+        "PTx-","PTx+","PTy-","PTy+","PTz-","PTz+",
+    };
+    for (int i = 0; i < 12; ++i)
+        vr::VROverlay()->CreateOverlay(ptr_adj_keys[i], ptr_adj_names[i], &ptr_adj[i]);
+    for (int i = 0; i < 12; ++i)
+        vr::VROverlay()->SetOverlayWidthInMeters(ptr_adj[i], ADJ_W);
+    for (int i = 0; i < 12; ++i) {
+        bool left = (i % 2 == 0);
+        auto tex = MakeArrowTexture(left, adj_info[i].label,
+            adj_info[i].r, adj_info[i].g, adj_info[i].b);
+        vr::VROverlay()->SetOverlayRaw(ptr_adj[i], tex.data(), 64, 64, 4);
+    }
+    for (int i = 0; i < 12; ++i) {
+        vr::VROverlay()->SetOverlayInputMethod(ptr_adj[i], vr::VROverlayInputMethod_None);
+        vr::VROverlay()->ShowOverlay(ptr_adj[i]);
+    }
+
+    // "Co" ボタン: 現在の ptr_rot / ptr_t を stdout に出力
+    const float BTN_COUT_Y = ADJ_ROW4_Y - ADJ_W - ADJ_GAP;
+    vr::VROverlayHandle_t btn_cout;
+    vr::VROverlay()->CreateOverlay("cr.btn_cout", "Cout", &btn_cout);
+    vr::VROverlay()->SetOverlayWidthInMeters(btn_cout, ADJ_W);
+    {
+        auto tex = MakeLabelTexture("Co");
+        vr::VROverlay()->SetOverlayRaw(btn_cout, tex.data(), 64, 64, 4);
+    }
+    {
+        vr::VROverlay()->SetOverlayInputMethod(btn_cout, vr::VROverlayInputMethod_None);
+        vr::VROverlay()->ShowOverlay(btn_cout);
+    }
+#endif // LASER_UI
 #endif // _DEBUG
+
+    // ── 右コントローラー正面方向ライン ──
+    // Rx(+90°) で overlay の height 方向をコントローラーの +Z（正面）に揃える
+    // 幅 0.004m × 高さ 0.256m (4x256 テクスチャ)、中心を z=0.128m に配置
+    vr::VROverlayHandle_t ptr_line;
+    vr::VROverlay()->CreateOverlay("camera_roll.ptr_line", "Pointer Line", &ptr_line);
+    {
+        auto ptex = MakePointerTexture();
+        vr::VROverlay()->SetOverlayRaw(ptr_line, ptex.data(), 4, 256, 4);
+        vr::VROverlay()->SetOverlayWidthInMeters(ptr_line, 0.004f);
+        vr::VROverlay()->ShowOverlay(ptr_line);
+    }
 
     // ── 画像読み込み ──
     ImageCollection collection;
@@ -361,13 +466,18 @@ int main() {
     UploadImages(img_overlays, collection);
     img_layout[0].y = CalcMainCenterY(SUB_Y, SUB_W, MAIN_W, collection.Main());
 
-    printf("Loaded %d image(s). Press Enter to exit.\n", collection.LoadedCount());
-    printf("rot=(%+.1f, %+.1f, %+.1f) deg  offset=(%+.3f, %+.3f, %+.3f) m\n",
-        rot_x*180.f/3.14159265f, rot_y*180.f/3.14159265f, rot_z*180.f/3.14159265f,
-        offset_x, offset_y, offset_z);
 
-    int dbg_frame = 0;
+    // ── ポインターライン調整パラメータ ──
+    Mat3 ptr_rot;
+    ptr_rot.m[0][0]=-0.996330f; ptr_rot.m[0][1]=-0.010861f; ptr_rot.m[0][2]=-0.084879f;
+    ptr_rot.m[1][0]=-0.074455f; ptr_rot.m[1][1]=+0.598924f; ptr_rot.m[1][2]=+0.797335f;
+    ptr_rot.m[2][0]=+0.042176f; ptr_rot.m[2][1]=+0.800731f; ptr_rot.m[2][2]=-0.597535f;
+    float ptr_tx = -0.020000f;
+    float ptr_ty = -0.090000f;
+    float ptr_tz = -0.062000f;
+
     bool prev_any_hit = false;
+    bool prev_trigger = false;
 
     while (true) {
         if (GetAsyncKeyState(VK_RETURN) & 0x8000) break;
@@ -404,6 +514,26 @@ int main() {
                     rot_x, rot_y, rot_z, offset_x, offset_y, offset_z);
                 vr::VROverlay()->SetOverlayTransformTrackedDeviceRelative(adj[i], left_hand, &t);
             }
+#ifdef LASER_UI
+            // 第3行: ポインター回転 (PRx/PRy/PRz)
+            for (int i = 0; i < 6; ++i) {
+                auto t = MakeTransform(adj_xs[i], ADJ_ROW3_Y, 0.f,
+                    rot_x, rot_y, rot_z, offset_x, offset_y, offset_z);
+                vr::VROverlay()->SetOverlayTransformTrackedDeviceRelative(ptr_adj[i], left_hand, &t);
+            }
+            // 第4行: ポインター移動 (PTx/PTy/PTz)
+            for (int i = 6; i < 12; ++i) {
+                auto t = MakeTransform(adj_xs[i - 6], ADJ_ROW4_Y, 0.f,
+                    rot_x, rot_y, rot_z, offset_x, offset_y, offset_z);
+                vr::VROverlay()->SetOverlayTransformTrackedDeviceRelative(ptr_adj[i], left_hand, &t);
+            }
+            // Co ボタン
+            {
+                auto t = MakeTransform(0.f, BTN_COUT_Y, 0.f,
+                    rot_x, rot_y, rot_z, offset_x, offset_y, offset_z);
+                vr::VROverlay()->SetOverlayTransformTrackedDeviceRelative(btn_cout, left_hand, &t);
+            }
+#endif // LASER_UI
 #endif // _DEBUG
         }
 
@@ -417,129 +547,115 @@ int main() {
         const bool right_valid = (right_hand != vr::k_unTrackedDeviceIndexInvalid)
                                && poses[right_hand].bPoseIsValid;
 
-#ifdef _DEBUG
-        if (++dbg_frame % 60 == 0) {
-            if (right_valid) {
-                auto& m = poses[right_hand].mDeviceToAbsoluteTracking.m;
-                vr::VROverlayIntersectionParams_t params;
-                params.eOrigin    = vr::TrackingUniverseStanding;
-                params.vSource    = { m[0][3], m[1][3], m[2][3] };
-                params.vDirection = { m[0][2], m[1][2], m[2][2] };
-                vr::VROverlayIntersectionResults_t res;
-                bool hit_btn = vr::VROverlay()->ComputeOverlayIntersection(btn_newer, &params, &res);
-                bool hit_sub = vr::VROverlay()->ComputeOverlayIntersection(img_overlays[1], &params, &res);
-                vr::TrackedDeviceIndex_t lh =
-                    vr_system->GetTrackedDeviceIndexForControllerRole(vr::TrackedControllerRole_LeftHand);
-                float lx=0,ly=0,lz=0;
-                if (lh != vr::k_unTrackedDeviceIndexInvalid && poses[lh].bPoseIsValid) {
-                    auto& lm = poses[lh].mDeviceToAbsoluteTracking.m;
-                    lx=lm[0][3]; ly=lm[1][3]; lz=lm[2][3];
-                }
-                printf("[DBG] right src=(%.2f,%.2f,%.2f) dir=(%.2f,%.2f,%.2f)\n",
-                    m[0][3],m[1][3],m[2][3], m[0][2],m[1][2],m[2][2]);
-                printf("[DBG] left  pos=(%.2f,%.2f,%.2f)\n", lx, ly, lz);
-                printf("[DBG] hit_btn_newer=%d  hit_sub[1]=%d  dist=%.3f\n",
-                    hit_btn, hit_sub, (hit_btn||hit_sub) ? res.fDistance : -1.f);
-            } else {
-                printf("[DBG] right_hand=%u valid=%d\n", right_hand, right_valid);
-            }
+        // ── 右コントローラー正面ライン更新 ──
+        if (right_valid) {
+            vr::HmdMatrix34_t line_t = {};
+            line_t.m[0][0]=ptr_rot.m[0][0]; line_t.m[0][1]=ptr_rot.m[0][1]; line_t.m[0][2]=ptr_rot.m[0][2]; line_t.m[0][3]=ptr_tx;
+            line_t.m[1][0]=ptr_rot.m[1][0]; line_t.m[1][1]=ptr_rot.m[1][1]; line_t.m[1][2]=ptr_rot.m[1][2]; line_t.m[1][3]=ptr_ty;
+            line_t.m[2][0]=ptr_rot.m[2][0]; line_t.m[2][1]=ptr_rot.m[2][1]; line_t.m[2][2]=ptr_rot.m[2][2]; line_t.m[2][3]=ptr_tz;
+            vr::VROverlay()->SetOverlayTransformTrackedDeviceRelative(ptr_line, right_hand, &line_t);
         }
-#endif // _DEBUG
 
         // ── 動的 MakeOverlaysInteractiveIfVisible 切り替え ──
         bool any_hit = false;
+        vr::VROverlayHandle_t hit_overlay = vr::k_ulOverlayHandleInvalid;
+        const char* hit_name = nullptr;
+        vr::VROverlayIntersectionResults_t hit_res = {};
         if (right_valid) {
             auto& m = poses[right_hand].mDeviceToAbsoluteTracking.m;
             vr::VROverlayIntersectionParams_t params;
             params.eOrigin    = vr::TrackingUniverseStanding;
-            params.vSource    = { m[0][3], m[1][3], m[2][3] };
-            params.vDirection = { m[0][2], m[1][2], m[2][2] };
+            params.vSource    = { m[0][0]*ptr_tx + m[0][1]*ptr_ty + m[0][2]*ptr_tz + m[0][3],
+                                  m[1][0]*ptr_tx + m[1][1]*ptr_ty + m[1][2]*ptr_tz + m[1][3],
+                                  m[2][0]*ptr_tx + m[2][1]*ptr_ty + m[2][2]*ptr_tz + m[2][3] };
+            params.vDirection = { m[0][0]*ptr_rot.m[0][2] + m[0][1]*ptr_rot.m[1][2] + m[0][2]*ptr_rot.m[2][2],
+                                  m[1][0]*ptr_rot.m[0][2] + m[1][1]*ptr_rot.m[1][2] + m[1][2]*ptr_rot.m[2][2],
+                                  m[2][0]*ptr_rot.m[0][2] + m[2][1]*ptr_rot.m[1][2] + m[2][2]*ptr_rot.m[2][2] };
             vr::VROverlayIntersectionResults_t res;
 
-            if (vr::VROverlay()->ComputeOverlayIntersection(btn_newer, &params, &res)) any_hit = true;
-            if (!any_hit && vr::VROverlay()->ComputeOverlayIntersection(btn_older, &params, &res)) any_hit = true;
+            auto test = [&](vr::VROverlayHandle_t h, const char* name) {
+                if (!any_hit && vr::VROverlay()->ComputeOverlayIntersection(h, &params, &res)) {
+                    any_hit = true; hit_overlay = h; hit_name = name; hit_res = res;
+                }
+            };
+
+            test(btn_newer, "btn_newer");
+            test(btn_older, "btn_older");
 #ifdef _DEBUG
-            for (int i = 0; i < 12 && !any_hit; ++i)
-                if (vr::VROverlay()->ComputeOverlayIntersection(adj[i], &params, &res)) any_hit = true;
+            for (int i = 0; i < 12; ++i) test(adj[i], adj_names[i]);
+#ifdef LASER_UI
+            for (int i = 0; i < 12; ++i) test(ptr_adj[i], ptr_adj_names[i]);
+            test(btn_cout, "btn_cout");
+#endif // LASER_UI
 #endif
-            for (int i = 1; i < N && !any_hit; ++i)
-                if (vr::VROverlay()->ComputeOverlayIntersection(img_overlays[i], &params, &res)) any_hit = true;
+            for (int i = 1; i < N; ++i) test(img_overlays[i], "img");
         }
         if (any_hit != prev_any_hit) {
-            for (auto h : { btn_newer, btn_older })
-                vr::VROverlay()->SetOverlayFlag(h, vr::VROverlayFlags_MakeOverlaysInteractiveIfVisible, any_hit);
-#ifdef _DEBUG
-            for (int i = 0; i < 12; ++i)
-                vr::VROverlay()->SetOverlayFlag(adj[i], vr::VROverlayFlags_MakeOverlaysInteractiveIfVisible, any_hit);
-#endif
-            for (int i = 1; i < N; ++i)
-                vr::VROverlay()->SetOverlayFlag(img_overlays[i], vr::VROverlayFlags_MakeOverlaysInteractiveIfVisible, any_hit);
+            if (any_hit)
+                printf("HIT: %s  dist=%.3fm  uv=(%.3f, %.3f)  pt=(%.3f, %.3f, %.3f)\n",
+                    hit_name, hit_res.fDistance,
+                    hit_res.vUVs.v[0], hit_res.vUVs.v[1],
+                    hit_res.vPoint.v[0], hit_res.vPoint.v[1], hit_res.vPoint.v[2]);
+            else
+                printf("MISS\n");
             prev_any_hit = any_hit;
         }
 
-        // ── イベント処理 ──
-        vr::VREvent_t event;
+        // ── トリガー入力・UI アクション ──
+        {
+            vr::VRControllerState_t ctrl = {};
+            const bool trigger_now = right_valid &&
+                vr_system->GetControllerState(right_hand, &ctrl, sizeof(ctrl)) &&
+                (ctrl.ulButtonPressed & vr::ButtonMaskFromId(vr::k_EButton_SteamVR_Trigger)) != 0;
 
-        while (vr::VROverlay()->PollNextOverlayEvent(btn_newer, &event, sizeof(event))) {
-            if (event.eventType == vr::VREvent_MouseButtonDown) {
-                collection.LoadNewerPage();
-                UploadImages(img_overlays, collection);
-                img_layout[0].y = CalcMainCenterY(SUB_Y, SUB_W, MAIN_W, collection.Main());
-                printf("Load newer page. Main: %s\n", collection.Main().path.filename().string().c_str());
-            }
-        }
-        while (vr::VROverlay()->PollNextOverlayEvent(btn_older, &event, sizeof(event))) {
-            if (event.eventType == vr::VREvent_MouseButtonDown) {
-                collection.LoadOlderPage();
-                UploadImages(img_overlays, collection);
-                img_layout[0].y = CalcMainCenterY(SUB_Y, SUB_W, MAIN_W, collection.Main());
-                printf("Load older page. Main: %s\n", collection.Main().path.filename().string().c_str());
-            }
-        }
-
-        for (int i = 1; i < N; ++i) {
-            while (vr::VROverlay()->PollNextOverlayEvent(img_overlays[i], &event, sizeof(event))) {
-                if (event.eventType == vr::VREvent_MouseButtonDown) {
-                    collection.SetMain(collection.Images().begin() + (i - 1));
-                    const Image& mi = collection.Main();
-                    if (mi.IsLoaded()) {
-                        vr::VROverlay()->SetOverlayRaw(
-                            img_overlays[0], (void*)mi.pixels.data(), mi.width, mi.height, 4);
+            if (trigger_now && !prev_trigger && any_hit) {
+                if (hit_overlay == btn_newer) {
+                    collection.LoadNewerPage();
+                    UploadImages(img_overlays, collection);
+                    img_layout[0].y = CalcMainCenterY(SUB_Y, SUB_W, MAIN_W, collection.Main());
+                } else if (hit_overlay == btn_older) {
+                    collection.LoadOlderPage();
+                    UploadImages(img_overlays, collection);
+                    img_layout[0].y = CalcMainCenterY(SUB_Y, SUB_W, MAIN_W, collection.Main());
+                } else {
+                    for (int i = 1; i < N; ++i) {
+                        if (hit_overlay != img_overlays[i]) continue;
+                        collection.SetMain(collection.Images().begin() + (i - 1));
+                        const Image& mi = collection.Main();
+                        if (mi.IsLoaded())
+                            vr::VROverlay()->SetOverlayRaw(img_overlays[0], (void*)mi.pixels.data(), mi.width, mi.height, 4);
+                        img_layout[0].y = CalcMainCenterY(SUB_Y, SUB_W, MAIN_W, mi);
+                        break;
                     }
-                    img_layout[0].y = CalcMainCenterY(SUB_Y, SUB_W, MAIN_W, mi);
-                    printf("Select sub[%d]: %s\n", i-1, mi.path.filename().string().c_str());
-                }
-            }
-        }
-
 #ifdef _DEBUG
-        // 調整ボタンイベント
-        // 上段: [0]=Rx-, [1]=Rx+, [2]=Ry-, [3]=Ry+, [4]=Rz-, [5]=Rz+
-        // 下段: [6]=Tx-, [7]=Tx+, [8]=Ty-, [9]=Ty+, [10]=Tz-,[11]=Tz+
-        float* rot_targets[6]    = { &rot_x, &rot_x, &rot_y, &rot_y, &rot_z, &rot_z };
-        float* offset_targets[6] = { &offset_x, &offset_x, &offset_y, &offset_y, &offset_z, &offset_z };
-        const char* rot_names[3] = { "rot_x", "rot_y", "rot_z" };
-        const char* off_names[3] = { "offset_x", "offset_y", "offset_z" };
-
-        for (int i = 0; i < 6; ++i) {
-            while (vr::VROverlay()->PollNextOverlayEvent(adj[i], &event, sizeof(event))) {
-                if (event.eventType == vr::VREvent_MouseButtonDown) {
-                    float delta = (i % 2 == 0) ? -ROT_STEP : +ROT_STEP;
-                    *rot_targets[i] += delta;
-                    printf("%s=%.1fdeg\n", rot_names[i/2], *rot_targets[i]*180.f/3.14159265f);
-                }
-            }
-        }
-        for (int i = 0; i < 6; ++i) {
-            while (vr::VROverlay()->PollNextOverlayEvent(adj[i + 6], &event, sizeof(event))) {
-                if (event.eventType == vr::VREvent_MouseButtonDown) {
-                    float delta = (i % 2 == 0) ? -MOVE_STEP : +MOVE_STEP;
-                    *offset_targets[i] += delta;
-                    printf("%s=%.3fm\n", off_names[i/2], *offset_targets[i]);
-                }
-            }
-        }
+                    float* rot_ptrs[3] = { &rot_x, &rot_y, &rot_z };
+                    float* off_ptrs[3] = { &offset_x, &offset_y, &offset_z };
+                    for (int i = 0; i < 6; ++i) {
+                        if (hit_overlay == adj[i])
+                            *rot_ptrs[i/2] += (i % 2 == 0) ? -ROT_STEP : +ROT_STEP;
+                        else if (hit_overlay == adj[i + 6])
+                            *off_ptrs[i/2] += (i % 2 == 0) ? -MOVE_STEP : +MOVE_STEP;
+                    }
+#ifdef LASER_UI
+                    for (int i = 0; i < 6; ++i) {
+                        if (hit_overlay == ptr_adj[i]) {
+                            float delta = (i % 2 == 0) ? -ROT_STEP : +ROT_STEP;
+                            if      (i < 2) ptr_rot = ptr_rot * Mat3::rotX(delta);
+                            else if (i < 4) ptr_rot = ptr_rot * Mat3::rotY(delta);
+                            else            ptr_rot = ptr_rot * Mat3::rotZ(delta);
+                        } else if (hit_overlay == ptr_adj[i + 6]) {
+                            float* ptr_offs[3] = { &ptr_tx, &ptr_ty, &ptr_tz };
+                            *ptr_offs[i/2] += (i % 2 == 0) ? -MOVE_STEP : +MOVE_STEP;
+                        }
+                    }
+#endif // LASER_UI
 #endif // _DEBUG
+                }
+            }
+            prev_trigger = trigger_now;
+        }
+
+        vr::VREvent_t event;
 
         if (vr::VROverlay()->PollNextOverlayEvent(img_overlays[0], &event, sizeof(event))) {
             if (event.eventType == vr::VREvent_Quit) break;
@@ -551,8 +667,13 @@ int main() {
     for (int i = 0; i < N; ++i) vr::VROverlay()->DestroyOverlay(img_overlays[i]);
     vr::VROverlay()->DestroyOverlay(btn_newer);
     vr::VROverlay()->DestroyOverlay(btn_older);
+    vr::VROverlay()->DestroyOverlay(ptr_line);
 #ifdef _DEBUG
     for (int i = 0; i < 12; ++i) vr::VROverlay()->DestroyOverlay(adj[i]);
+#ifdef LASER_UI
+    for (int i = 0; i < 12; ++i) vr::VROverlay()->DestroyOverlay(ptr_adj[i]);
+    vr::VROverlay()->DestroyOverlay(btn_cout);
+#endif // LASER_UI
 #endif
     vr::VR_Shutdown();
     return 0;
