@@ -127,20 +127,36 @@
       <PreprocessorDefinitions>NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp20</LanguageStandard>
+      <AdditionalIncludeDirectories>$(ProjectDir)..\..\..\openvr\headers; $(ProjectDir)..\..\..\stb</AdditionalIncludeDirectories>
+      <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
+      <AdditionalLibraryDirectories>$(ProjectDir)..\..\..\openvr\lib\win64</AdditionalLibraryDirectories>
+      <AdditionalDependencies>$(CoreLibraryDependencies);%(AdditionalDependencies); openvr_api.lib; opengl32.lib; gdi32.lib</AdditionalDependencies>
     </Link>
+    <PostBuildEvent>
+      <Command>xcopy /Y /E "$(ProjectDir)actions" "$(OutDir)actions\"</Command>
+    </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="CameraRollUI.cpp" />
+    <ClCompile Include="DebugUI.cpp" />
     <ClCompile Include="Image.cpp" />
     <ClCompile Include="ImageCollection.cpp" />
+    <ClCompile Include="LaserController.cpp" />
     <ClCompile Include="main.cpp" />
+    <ClCompile Include="TriggerableButton.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="CameraRollUI.h" />
+    <ClInclude Include="DebugUI.h" />
     <ClInclude Include="Image.h" />
     <ClInclude Include="ImageCollection.h" />
+    <ClInclude Include="LaserController.h" />
+    <ClInclude Include="Mat3.h" />
+    <ClInclude Include="TriggerableButton.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
