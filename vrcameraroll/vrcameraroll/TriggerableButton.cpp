@@ -60,10 +60,7 @@ void TriggerableButton::SetTransformTrackedDeviceRelative(
     vr::TrackedDeviceIndex_t device, const vr::HmdMatrix34_t& transform)
 {
     auto err = vr::VROverlay()->SetOverlayTransformTrackedDeviceRelative(m_handle, device, &transform);
-    if (err != vr::VROverlayError_None) {
-        printf("SetOverlayTransformTrackedDeviceRelative handle=%llu err=%d\n",
-               (unsigned long long)m_handle, (int)err);
-    }
+    (void)err;
 }
 
 void TriggerableButton::UploadTexture(const std::vector<uint8_t>& pixels, int w, int h) {

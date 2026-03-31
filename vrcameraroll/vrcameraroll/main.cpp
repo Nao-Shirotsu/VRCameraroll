@@ -36,15 +36,12 @@ static std::string LoadImageFolderFromConfig() {
             size_t end   = value.find_last_not_of(" \t\r\n");
             if (start == std::string::npos) return {};
             std::string raw = value.substr(start, end - start + 1);
-            printf("config.yml raw:      [%s]\n", raw.c_str());
             // %USERPROFILE% などの環境変数を展開する
             char expanded[32767];  // ExpandEnvironmentStrings の最大バッファサイズ
             DWORD n = ExpandEnvironmentStringsA(raw.c_str(), expanded, (DWORD)sizeof(expanded));
             if (n == 0 || n > sizeof(expanded)) {
-                printf("ExpandEnvironmentStrings 失敗 (raw を使用)\n");
                 return raw;
             }
-            printf("config.yml expanded: [%s]\n", expanded);
             return expanded;
         }
     }
@@ -69,7 +66,8 @@ int main() {
         vr::VR_Shutdown();
         return 1;
     }
-    printf("image_folder: %s\n", image_folder.c_str());
+    printf("画像フォルダ: %s\n", image_folder.c_str());
+    printf("起動しました。終了するには Enter キーを押すか、このウィンドウを閉じてください。\n");
 
     CameraRollUI camera_roll;
     camera_roll.LoadImages(image_folder.c_str());
@@ -106,12 +104,11 @@ int main() {
             // setactive dir: HMD ローカル+Z軸（正面の逆方向、第2列）
             const float sdx = hm[0][2], sdy = hm[1][2], sdz = hm[2][2];
             const float dot = nx * sdx + ny * sdy + nz * sdz;
-            printf("palm dot=%.3f\n", dot);  // デバッグ出力（動作確認後削除予定）
             const bool next_active = (dot >= 0.5f);
             if (next_active != prev_active) {
                 camera_roll.SetActive(next_active);
                 laser.SetActive(next_active);
-                printf("overlay %s\n", next_active ? "ON" : "OFF");
+                printf("カメラロール: %s\n", next_active ? "表示" : "非表示");
                 prev_active = next_active;
             }
         }
@@ -156,19 +153,6 @@ int main() {
 
         const bool any_hit = (hit != nullptr);
         if (any_hit != prev_any_hit) {
-            if (any_hit) {
-                // どのボタンが当たったかインデックスを特定
-                int hit_idx = -1;
-                for (size_t i = 0; i < buttons.size(); ++i) {
-                    if (buttons[i] == hit) { hit_idx = (int)i; break; }
-                }
-                printf("HIT btn[%d] handle=%llu  dist=%.3fm  uv=(%.3f,%.3f)\n",
-                    hit_idx, (unsigned long long)hit->Handle(),
-                    hit_res.fDistance,
-                    hit_res.vUVs.v[0], hit_res.vUVs.v[1]);
-            } else {
-                printf("MISS\n");
-            }
             prev_any_hit = any_hit;
         }
 
