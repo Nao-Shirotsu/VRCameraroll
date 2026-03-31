@@ -32,10 +32,16 @@ public:
     int LoadedCount() const;
 
     int GetOffset() const { return m_offset; }
+    int GetTotalCount() const { return m_total_count; }
+
+    // ページ端判定
+    bool IsAtNewest() const { return m_offset == 0; }
+    bool IsAtOldest() const { return m_total_count == 0 || m_offset + N >= m_total_count; }
 
 private:
     std::array<Image, N> m_images;
     Iterator              m_main_it;
     std::filesystem::path m_folder;
-    int                   m_offset = 0;
+    int                   m_offset      = 0;
+    int                   m_total_count = 0;
 };

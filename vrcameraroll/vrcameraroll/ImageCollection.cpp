@@ -35,8 +35,9 @@ void ImageCollection::LoadFromFolder(const std::filesystem::path& folder, int of
             return a.last_write_time() > b.last_write_time();
         });
 
-    m_folder = folder;
-    m_offset = offset;
+    m_folder      = folder;
+    m_offset      = offset;
+    m_total_count = (int)entries.size();
 
     int start = std::min(offset, (int)entries.size());
     int count = std::min(N, (int)entries.size() - start);

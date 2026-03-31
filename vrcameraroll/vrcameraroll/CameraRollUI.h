@@ -49,10 +49,12 @@ public:
     vr::VROverlayHandle_t MainOverlayHandle() const { return m_img_overlays[0]; }
 
     // 定数
-    static constexpr int N      = ImageCollection::N;
+    static constexpr int N        = ImageCollection::N;
     static constexpr float MAIN_W = 0.25f;
     static constexpr float SUB_W  = MAIN_W / (N - 1);
     static constexpr float SUB_Y  = -0.03f;
+    static constexpr float BTN_GAP = 0.01f;
+    static constexpr float BTN_W   = 0.05f;
 
 private:
     bool m_active = true;
@@ -60,6 +62,9 @@ private:
     ImageCollection      m_collection;
     ImageFolderObserver  m_observer;
     std::filesystem::path m_folder;
+
+    // 背景オーバーレイ（サブ画像ストリップの背面）
+    vr::VROverlayHandle_t m_bg_overlay;
 
     // 画像オーバーレイ (overlays[0]=メイン, [1..N-1]=サブ)
     std::array<vr::VROverlayHandle_t, N> m_img_overlays;
@@ -85,6 +90,7 @@ private:
 
     void UploadImages();
     void UpdateMainY();
+    void UpdateArrowColors();
     void ReloadAtOffset(int offset);
     void OnNewerPage();
     void OnOlderPage();

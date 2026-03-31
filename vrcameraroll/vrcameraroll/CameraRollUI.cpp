@@ -2,9 +2,30 @@
 #include <algorithm>
 #include <cstring>
 
+static constexpr float BAR_FRAC = 0.08f; // iPad風グレー帯の高さ比率（画像高さに対する割合）
+
 // ────────────────────────────────────────────
-// 内部テクスチャ生成
+// 内部テクスチャ生成ヘルパー
 // ────────────────────────────────────────────
+
+// 四隅を丸角にする（アルファチャンネルを透明化）
+static void ApplyRoundedCorners(std::vector<uint8_t>& pixels, int w, int h, int radius) {
+    if (radius <= 0) return;
+    for (int y = 0; y < radius; ++y) {
+        for (int x = 0; x < radius; ++x) {
+            int dx = x - radius, dy = y - radius;
+            if (dx*dx + dy*dy > radius*radius) {
+                auto zero_alpha = [&](int px, int py) {
+                    pixels[(py * w + px) * 4 + 3] = 0;
+                };
+                zero_alpha(x,       y);       // 左上
+                zero_alpha(w-1-x,   y);       // 右上
+                zero_alpha(x,       h-1-y);   // 左下
+                zero_alpha(w-1-x,   h-1-y);   // 右下
+            }
+        }
+    }
+}
 
 static std::vector<uint8_t> MakeCroppedThumbnail(const Image& img, int scale = 8) {
     int crop_size = std::min(img.width, img.height);
@@ -32,17 +53,26 @@ static std::vector<uint8_t> MakeCroppedThumbnail(const Image& img, int scale = 8
             out[dst+2]=(uint8_t)(b/count); out[dst+3]=(uint8_t)(a/count);
         }
     }
+    // 丸角（サムネイルサイズの約12.5%）
+    ApplyRoundedCorners(out, tw, tw, std::max(1, tw / 8));
     return out;
 }
 
-static std::vector<uint8_t> MakeArrowTexture(bool left_arrow,
-    uint8_t bg_r = 80, uint8_t bg_g = 80, uint8_t bg_b = 80)
-{
+// active=true: 緑, active=false: グレーアウト
+static std::vector<uint8_t> MakeArrowTexture(bool left_arrow, bool active = true) {
     constexpr int S = 64;
     std::vector<uint8_t> pixels(S * S * 4);
+    uint8_t bg_r, bg_g, bg_b, bg_a, arr_r, arr_g, arr_b;
+    if (active) {
+        bg_r=40;  bg_g=110; bg_b=70;  bg_a=220;
+        arr_r=110; arr_g=235; arr_b=150;
+    } else {
+        bg_r=65;  bg_g=65;  bg_b=68;  bg_a=160;
+        arr_r=105; arr_g=105; arr_b=108;
+    }
     for (int i = 0; i < S * S; ++i) {
         pixels[i*4+0]=bg_r; pixels[i*4+1]=bg_g;
-        pixels[i*4+2]=bg_b; pixels[i*4+3]=180;
+        pixels[i*4+2]=bg_b; pixels[i*4+3]=bg_a;
     }
     const int cy = S / 2, half = S / 4;
     for (int y = 0; y < S; ++y) {
@@ -53,11 +83,13 @@ static std::vector<uint8_t> MakeArrowTexture(bool left_arrow,
                 : (dx <=  half && dx >= 0 && ady <= half - dx);
             if (tri) {
                 int idx = (y * S + x) * 4;
-                pixels[idx+0]=220; pixels[idx+1]=220;
-                pixels[idx+2]=220; pixels[idx+3]=255;
+                pixels[idx+0]=arr_r; pixels[idx+1]=arr_g;
+                pixels[idx+2]=arr_b; pixels[idx+3]=255;
             }
         }
     }
+    // 丸角
+    ApplyRoundedCorners(pixels, S, S, S / 6);
     return pixels;
 }
 
@@ -68,14 +100,71 @@ static void UploadGrey(vr::VROverlayHandle_t overlay) {
     vr::VROverlay()->SetOverlayRaw(overlay, grey, 64, 64, 4);
 }
 
+// メイン画像をiPad風グレー帯付き・丸角でラップしたテクスチャを返す
+struct PixelBuffer { std::vector<uint8_t> pixels; int w, h; };
+
+static PixelBuffer MakeMainImageTexture(const Image& img) {
+    int bar_h = std::max(16, (int)(img.height * BAR_FRAC));
+    int w = img.width;
+    int h = img.height + 2 * bar_h;
+    std::vector<uint8_t> out(w * h * 4, 0);
+
+    // グレー帯を塗る（上下）
+    constexpr uint8_t BR = 55, BG = 55, BB = 58;
+    for (int y = 0; y < h; ++y) {
+        if (y < bar_h || y >= h - bar_h) {
+            for (int x = 0; x < w; ++x) {
+                int idx = (y * w + x) * 4;
+                out[idx+0]=BR; out[idx+1]=BG; out[idx+2]=BB; out[idx+3]=255;
+            }
+        }
+    }
+
+    // 画像を中央に貼り付け
+    for (int y = 0; y < img.height; ++y) {
+        int src_row = y * img.width * 4;
+        int dst_row = (y + bar_h) * w * 4;
+        std::memcpy(out.data() + dst_row, img.pixels.data() + src_row, img.width * 4);
+    }
+
+    // 外枠に丸角（帯の高さと幅の1/20の小さい方）
+    int radius = std::min(bar_h, w / 20);
+    ApplyRoundedCorners(out, w, h, radius);
+
+    return { std::move(out), w, h };
+}
+
+// サブ画像ストリップの背景テクスチャ（ダーク角丸矩形）
+static std::vector<uint8_t> MakeStripBgTexture(int w, int h) {
+    std::vector<uint8_t> pixels(w * h * 4);
+    for (int i = 0; i < w * h; ++i) {
+        pixels[i*4+0]=30; pixels[i*4+1]=30;
+        pixels[i*4+2]=35; pixels[i*4+3]=190;
+    }
+    ApplyRoundedCorners(pixels, w, h, h / 3);
+    return pixels;
+}
+
 // ────────────────────────────────────────────
 // CameraRollUI
 // ────────────────────────────────────────────
 
 CameraRollUI::CameraRollUI()
-    : m_btn_newer("camera_roll.btn_newer", "Newer", 0.05f, [this]{ OnNewerPage(); })
-    , m_btn_older("camera_roll.btn_older", "Older", 0.05f, [this]{ OnOlderPage(); })
+    : m_btn_newer("camera_roll.btn_newer", "Newer", BTN_W, [this]{ OnNewerPage(); })
+    , m_btn_older("camera_roll.btn_older", "Older", BTN_W, [this]{ OnOlderPage(); })
 {
+    // 背景オーバーレイを最初に生成（描画順が後続より前になるように）
+    vr::VROverlay()->CreateOverlay("camera_roll.bg", "Camera Roll BG", &m_bg_overlay);
+    vr::VROverlay()->ShowOverlay(m_bg_overlay);
+    vr::VROverlay()->SetOverlayInputMethod(m_bg_overlay, vr::VROverlayInputMethod_None);
+    constexpr float BG_W = MAIN_W + 2.0f * (BTN_GAP + BTN_W);
+    vr::VROverlay()->SetOverlayWidthInMeters(m_bg_overlay, BG_W);
+    {
+        constexpr int BG_TW = 512, BG_TH = 72;
+        auto bg_tex = MakeStripBgTexture(BG_TW, BG_TH);
+        vr::VROverlay()->SetOverlayRaw(m_bg_overlay, bg_tex.data(), BG_TW, BG_TH, 4);
+    }
+
     // 画像オーバーレイ生成
     for (int i = 0; i < N; ++i) {
         char key[64], name[64];
@@ -101,27 +190,29 @@ CameraRollUI::CameraRollUI()
         UploadGrey(m_img_overlays[i]);
     }
 
-    // ページ送りボタンのテクスチャ
-    m_btn_newer.UploadTexture(MakeArrowTexture(true), 64, 64);
-    m_btn_older.UploadTexture(MakeArrowTexture(false), 64, 64);
+    // ページ送りボタンのテクスチャ（初期状態: 両方グレーアウト）
+    m_btn_newer.UploadTexture(MakeArrowTexture(true,  false), 64, 64);
+    m_btn_older.UploadTexture(MakeArrowTexture(false, false), 64, 64);
     m_btn_newer.Show();
     m_btn_older.Show();
 
-    // サブ画像 TriggerableButton: m_img_overlays[i] を所有権なしで引き受ける。
-    // 別 overlay を作らないことで同位置の二重 overlay を避ける。
+    // サブ画像 TriggerableButton
     for (int i = 1; i < N; ++i) {
         m_sub_btns.emplace_back(m_img_overlays[i], [this, idx = i - 1]{
             m_collection.SetMain(m_collection.Images().begin() + idx);
             const Image& mi = m_collection.Main();
-            if (mi.IsLoaded())
+            if (mi.IsLoaded()) {
+                auto buf = MakeMainImageTexture(mi);
                 vr::VROverlay()->SetOverlayRaw(m_img_overlays[0],
-                    (void*)mi.pixels.data(), mi.width, mi.height, 4);
+                    buf.pixels.data(), buf.w, buf.h, 4);
+            }
             UpdateMainY();
         });
     }
 }
 
 CameraRollUI::~CameraRollUI() {
+    vr::VROverlay()->DestroyOverlay(m_bg_overlay);
     for (int i = 0; i < N; ++i)
         vr::VROverlay()->DestroyOverlay(m_img_overlays[i]);
     // TriggerableButton のデストラクタが overlay を破棄する
@@ -132,6 +223,7 @@ void CameraRollUI::LoadImages(const std::filesystem::path& folder) {
     m_collection.LoadFromFolder(folder);
     UploadImages();
     UpdateMainY();
+    UpdateArrowColors();
     m_observer.Start(folder, 0, [this](int offset) { ReloadAtOffset(offset); });
 }
 
@@ -142,9 +234,9 @@ void CameraRollUI::PollFolderChanges() {
 void CameraRollUI::UploadImages() {
     const Image& main_img = m_collection.Main();
     if (main_img.IsLoaded()) {
+        auto buf = MakeMainImageTexture(main_img);
         vr::VROverlay()->SetOverlayRaw(
-            m_img_overlays[0], (void*)main_img.pixels.data(),
-            main_img.width, main_img.height, 4);
+            m_img_overlays[0], buf.pixels.data(), buf.w, buf.h, 4);
     } else {
         UploadGrey(m_img_overlays[0]);
     }
@@ -163,16 +255,30 @@ void CameraRollUI::UploadImages() {
 
 void CameraRollUI::UpdateMainY() {
     const Image& img = m_collection.Main();
-    float aspect      = (img.IsLoaded() && img.width > 0)
-                        ? (float)img.height / (float)img.width : 1.0f;
+    float aspect;
+    if (img.IsLoaded() && img.width > 0) {
+        int bar_h = std::max(16, (int)(img.height * BAR_FRAC));
+        aspect = (float)(img.height + 2 * bar_h) / (float)img.width;
+    } else {
+        aspect = 1.0f;
+    }
     float sub_top     = SUB_Y + SUB_W / 2.0f;
     float main_height = MAIN_W * aspect;
     m_img_layout[0].y = sub_top + 0.005f + main_height / 2.0f;
 }
 
+void CameraRollUI::UpdateArrowColors() {
+    bool can_newer = !m_collection.IsAtNewest();
+    bool can_older = !m_collection.IsAtOldest();
+    m_btn_newer.UploadTexture(MakeArrowTexture(true,  can_newer), 64, 64);
+    m_btn_older.UploadTexture(MakeArrowTexture(false, can_older), 64, 64);
+}
+
 void CameraRollUI::SetActive(bool active) {
     m_active = active;
     auto* ovr = vr::VROverlay();
+    if (active) ovr->ShowOverlay(m_bg_overlay);
+    else        ovr->HideOverlay(m_bg_overlay);
     for (auto h : m_img_overlays) {
         if (active) ovr->ShowOverlay(h);
         else        ovr->HideOverlay(h);
@@ -198,8 +304,14 @@ void CameraRollUI::UpdateTransforms(vr::TrackedDeviceIndex_t left_hand) {
             m_img_overlays[i], left_hand, &t);
     }
 
+    // 背景オーバーレイ（サブ画像ストリップ中央）
+    {
+        auto t = make(0.f, SUB_Y);
+        vr::VROverlay()->SetOverlayTransformTrackedDeviceRelative(
+            m_bg_overlay, left_hand, &t);
+    }
+
     // ページ送りボタン
-    const float BTN_GAP = 0.01f, BTN_W = 0.05f;
     const float BTN_L_X = -(MAIN_W / 2.0f + BTN_GAP + BTN_W / 2.0f);
     const float BTN_R_X =  (MAIN_W / 2.0f + BTN_GAP + BTN_W / 2.0f);
     m_btn_newer.SetTransformTrackedDeviceRelative(left_hand, make(BTN_L_X, SUB_Y));
@@ -222,6 +334,7 @@ void CameraRollUI::ReloadAtOffset(int offset) {
     m_collection.LoadFromFolder(m_folder, offset);
     UploadImages();
     UpdateMainY();
+    UpdateArrowColors();
 }
 
 void CameraRollUI::OnNewerPage() {
@@ -229,6 +342,7 @@ void CameraRollUI::OnNewerPage() {
     m_observer.SetOffset(m_collection.GetOffset());
     UploadImages();
     UpdateMainY();
+    UpdateArrowColors();
 }
 
 void CameraRollUI::OnOlderPage() {
@@ -236,4 +350,5 @@ void CameraRollUI::OnOlderPage() {
     m_observer.SetOffset(m_collection.GetOffset());
     UploadImages();
     UpdateMainY();
+    UpdateArrowColors();
 }
