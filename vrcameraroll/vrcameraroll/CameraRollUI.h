@@ -42,6 +42,9 @@ public:
     // 当たり判定ループに渡すボタンリスト（ページ送り + サブ画像）
     std::vector<TriggerableButton*> Buttons();
 
+    // 毎フレーム: ホバー中のボタンを渡してサブ画像の明暗を更新する（nullptr=非ホバー）
+    void UpdateHover(TriggerableButton* hit);
+
     void SetActive(bool active);
     bool IsActive() const { return m_active; }
 
@@ -87,6 +90,9 @@ private:
     // レイアウト
     struct Layout { float x, y; };
     std::array<Layout, N> m_img_layout;
+
+    // ホバー状態（-1=なし、0..N-2=サブ画像インデックス）
+    int m_hovered_sub_idx = -1;
 
     void UploadImages();
     void UpdateMainY();

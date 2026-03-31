@@ -2,7 +2,8 @@
 #include <algorithm>
 #include <cstring>
 
-static constexpr float BAR_FRAC = 0.08f; // iPad風グレー帯の高さ比率（画像高さに対する割合）
+static constexpr float BAR_FRAC      = 0.04f; // iPad風グレー帯の高さ比率（画像高さに対する割合）
+static constexpr float SIDE_PAD_FRAC = 0.03f; // 左右グレー帯の幅比率（画像幅に対する割合）
 
 // ────────────────────────────────────────────
 // 内部テクスチャ生成ヘルパー
@@ -96,39 +97,36 @@ static std::vector<uint8_t> MakeArrowTexture(bool left_arrow, bool active = true
 static void UploadGrey(vr::VROverlayHandle_t overlay) {
     static uint8_t grey[64 * 64 * 4];
     static bool init = false;
-    if (!init) { std::memset(grey, 128, sizeof(grey)); init = true; }
+    if (!init) { std::memset(grey, 192, sizeof(grey)); init = true; }
     vr::VROverlay()->SetOverlayRaw(overlay, grey, 64, 64, 4);
 }
 
 // メイン画像をiPad風グレー帯付き・丸角でラップしたテクスチャを返す
+// 上下に bar_h px、左右に side_pad px のグレー帯を追加する
 struct PixelBuffer { std::vector<uint8_t> pixels; int w, h; };
 
 static PixelBuffer MakeMainImageTexture(const Image& img) {
-    int bar_h = std::max(16, (int)(img.height * BAR_FRAC));
-    int w = img.width;
+    int bar_h    = std::max(8,  (int)(img.height * BAR_FRAC));
+    int side_pad = std::max(4,  (int)(img.width  * SIDE_PAD_FRAC));
+    int w = img.width  + 2 * side_pad;
     int h = img.height + 2 * bar_h;
     std::vector<uint8_t> out(w * h * 4, 0);
 
-    // グレー帯を塗る（上下）
+    // キャンバス全体をグレーで塗る（上下帯 + 左右帯を一括）
     constexpr uint8_t BR = 55, BG = 55, BB = 58;
-    for (int y = 0; y < h; ++y) {
-        if (y < bar_h || y >= h - bar_h) {
-            for (int x = 0; x < w; ++x) {
-                int idx = (y * w + x) * 4;
-                out[idx+0]=BR; out[idx+1]=BG; out[idx+2]=BB; out[idx+3]=255;
-            }
-        }
+    for (int i = 0; i < w * h; ++i) {
+        out[i*4+0]=BR; out[i*4+1]=BG; out[i*4+2]=BB; out[i*4+3]=255;
     }
 
-    // 画像を中央に貼り付け
+    // 画像をキャンバス中央に貼り付け
     for (int y = 0; y < img.height; ++y) {
-        int src_row = y * img.width * 4;
-        int dst_row = (y + bar_h) * w * 4;
-        std::memcpy(out.data() + dst_row, img.pixels.data() + src_row, img.width * 4);
+        const uint8_t* src = img.pixels.data() + y * img.width * 4;
+        uint8_t*       dst = out.data() + (y + bar_h) * w * 4 + side_pad * 4;
+        std::memcpy(dst, src, img.width * 4);
     }
 
-    // 外枠に丸角（帯の高さと幅の1/20の小さい方）
-    int radius = std::min(bar_h, w / 20);
+    // 外枠に丸角
+    int radius = std::min({ bar_h, side_pad, w / 20, h / 20 });
     ApplyRoundedCorners(out, w, h, radius);
 
     return { std::move(out), w, h };
@@ -153,10 +151,11 @@ CameraRollUI::CameraRollUI()
     : m_btn_newer("camera_roll.btn_newer", "Newer", BTN_W, [this]{ OnNewerPage(); })
     , m_btn_older("camera_roll.btn_older", "Older", BTN_W, [this]{ OnOlderPage(); })
 {
-    // 背景オーバーレイを最初に生成（描画順が後続より前になるように）
+    // 背景オーバーレイ（sort order 0 = 最背面）
     vr::VROverlay()->CreateOverlay("camera_roll.bg", "Camera Roll BG", &m_bg_overlay);
     vr::VROverlay()->ShowOverlay(m_bg_overlay);
     vr::VROverlay()->SetOverlayInputMethod(m_bg_overlay, vr::VROverlayInputMethod_None);
+    vr::VROverlay()->SetOverlaySortOrder(m_bg_overlay, 0);
     constexpr float BG_W = MAIN_W + 2.0f * (BTN_GAP + BTN_W);
     vr::VROverlay()->SetOverlayWidthInMeters(m_bg_overlay, BG_W);
     {
@@ -165,13 +164,14 @@ CameraRollUI::CameraRollUI()
         vr::VROverlay()->SetOverlayRaw(m_bg_overlay, bg_tex.data(), BG_TW, BG_TH, 4);
     }
 
-    // 画像オーバーレイ生成
+    // 画像オーバーレイ生成（sort order 1 = 中間）
     for (int i = 0; i < N; ++i) {
         char key[64], name[64];
         std::snprintf(key,  sizeof(key),  "camera_roll.img%d", i);
         std::snprintf(name, sizeof(name), "Camera Roll %d", i);
         vr::VROverlay()->CreateOverlay(key, name, &m_img_overlays[i]);
         vr::VROverlay()->ShowOverlay(m_img_overlays[i]);
+        vr::VROverlay()->SetOverlaySortOrder(m_img_overlays[i], 1);
     }
 
     // サブ画像はマウス入力不要
@@ -190,9 +190,11 @@ CameraRollUI::CameraRollUI()
         UploadGrey(m_img_overlays[i]);
     }
 
-    // ページ送りボタンのテクスチャ（初期状態: 両方グレーアウト）
+    // ページ送りボタンのテクスチャ（sort order 2 = 最前面、初期状態: 両方グレーアウト）
     m_btn_newer.UploadTexture(MakeArrowTexture(true,  false), 64, 64);
     m_btn_older.UploadTexture(MakeArrowTexture(false, false), 64, 64);
+    vr::VROverlay()->SetOverlaySortOrder(m_btn_newer.Handle(), 2);
+    vr::VROverlay()->SetOverlaySortOrder(m_btn_older.Handle(), 2);
     m_btn_newer.Show();
     m_btn_older.Show();
 
@@ -232,6 +234,12 @@ void CameraRollUI::PollFolderChanges() {
 }
 
 void CameraRollUI::UploadImages() {
+    // 画像が切り替わったらホバー状態をリセット（デフォルトはグレーアウト）
+    m_hovered_sub_idx = -1;
+    constexpr float DIM = 0.35f;
+    for (int i = 1; i < N; ++i)
+        vr::VROverlay()->SetOverlayColor(m_img_overlays[i], DIM, DIM, DIM);
+
     const Image& main_img = m_collection.Main();
     if (main_img.IsLoaded()) {
         auto buf = MakeMainImageTexture(main_img);
@@ -257,8 +265,11 @@ void CameraRollUI::UpdateMainY() {
     const Image& img = m_collection.Main();
     float aspect;
     if (img.IsLoaded() && img.width > 0) {
-        int bar_h = std::max(16, (int)(img.height * BAR_FRAC));
-        aspect = (float)(img.height + 2 * bar_h) / (float)img.width;
+        int bar_h    = std::max(8, (int)(img.height * BAR_FRAC));
+        int side_pad = std::max(4, (int)(img.width  * SIDE_PAD_FRAC));
+        int new_w = img.width  + 2 * side_pad;
+        int new_h = img.height + 2 * bar_h;
+        aspect = (float)new_h / (float)new_w;
     } else {
         aspect = 1.0f;
     }
@@ -304,19 +315,36 @@ void CameraRollUI::UpdateTransforms(vr::TrackedDeviceIndex_t left_hand) {
             m_img_overlays[i], left_hand, &t);
     }
 
-    // 背景オーバーレイ（サブ画像ストリップ中央）
+    // 背景オーバーレイ（sort order で前後制御するため z=0）
     {
         auto t = make(0.f, SUB_Y);
         vr::VROverlay()->SetOverlayTransformTrackedDeviceRelative(
             m_bg_overlay, left_hand, &t);
     }
 
-    // ページ送りボタン
+    // ページ送りボタン（sort order 2 で常に前面）
     const float BTN_L_X = -(MAIN_W / 2.0f + BTN_GAP + BTN_W / 2.0f);
     const float BTN_R_X =  (MAIN_W / 2.0f + BTN_GAP + BTN_W / 2.0f);
     m_btn_newer.SetTransformTrackedDeviceRelative(left_hand, make(BTN_L_X, SUB_Y));
     m_btn_older.SetTransformTrackedDeviceRelative(left_hand, make(BTN_R_X, SUB_Y));
     // サブ画像ボタンは m_img_overlays[i] と同じハンドルなので位置は上のループで設定済み
+}
+
+void CameraRollUI::UpdateHover(TriggerableButton* hit) {
+    // どのサブ画像がホバーされているか特定
+    int new_hover = -1;
+    for (int i = 0; i < (int)m_sub_btns.size(); ++i) {
+        if (hit == &m_sub_btns[i]) { new_hover = i; break; }
+    }
+    if (new_hover == m_hovered_sub_idx) return; // 変化なし
+    m_hovered_sub_idx = new_hover;
+
+    // 常にグレーアウト基準。ホバー中の1枚だけ通常輝度にする。
+    constexpr float DIM = 0.35f;
+    for (int i = 1; i < N; ++i) {
+        float c = (i - 1 == new_hover) ? 1.0f : DIM;
+        vr::VROverlay()->SetOverlayColor(m_img_overlays[i], c, c, c);
+    }
 }
 
 std::vector<TriggerableButton*> CameraRollUI::Buttons() {

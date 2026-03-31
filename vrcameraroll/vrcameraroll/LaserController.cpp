@@ -46,11 +46,12 @@ LaserController::LaserController() {
     vr::VROverlay()->SetOverlayWidthInMeters(m_ptr_line, 0.0005f); // 太さ1mm, 長さ = 0.001 × 1000 = 1.0m
     vr::VROverlay()->ShowOverlay(m_ptr_line);
 
-    // ヒットドット overlay（最初は非表示）
+    // ヒットドット overlay（最初は非表示、sort order 3 = 常に最前面）
     vr::VROverlay()->CreateOverlay("camera_roll.hit_dot", "Hit Dot", &m_hit_dot);
     auto dtex = MakeHitDotTexture();
     vr::VROverlay()->SetOverlayRaw(m_hit_dot, dtex.data(), 64, 64, 4);
     vr::VROverlay()->SetOverlayWidthInMeters(m_hit_dot, 0.02f);
+    vr::VROverlay()->SetOverlaySortOrder(m_hit_dot, 3);
 
     // デフォルト回転行列（キャリブレーション済み値）
     m_rot.m[0][0]=+0.082687f; m_rot.m[0][1]=+0.996505f; m_rot.m[0][2]=-0.011556f;

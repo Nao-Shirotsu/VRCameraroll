@@ -191,6 +191,8 @@ int main() {
             right_hand,
             right_valid ? &poses[right_hand] : nullptr);
 
+        camera_roll.UpdateHover(hit);
+
         const bool any_hit = (hit != nullptr);
         if (any_hit != prev_any_hit) {
             prev_any_hit = any_hit;
