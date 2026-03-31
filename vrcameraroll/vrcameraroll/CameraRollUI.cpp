@@ -128,9 +128,15 @@ CameraRollUI::~CameraRollUI() {
 }
 
 void CameraRollUI::LoadImages(const std::filesystem::path& folder) {
+    m_folder = folder;
     m_collection.LoadFromFolder(folder);
     UploadImages();
     UpdateMainY();
+    m_observer.Start(folder, 0, [this](int offset) { ReloadAtOffset(offset); });
+}
+
+void CameraRollUI::PollFolderChanges() {
+    m_observer.Poll();
 }
 
 void CameraRollUI::UploadImages() {
@@ -211,14 +217,23 @@ std::vector<TriggerableButton*> CameraRollUI::Buttons() {
 }
 
 // private helpers called from lambdas
+
+void CameraRollUI::ReloadAtOffset(int offset) {
+    m_collection.LoadFromFolder(m_folder, offset);
+    UploadImages();
+    UpdateMainY();
+}
+
 void CameraRollUI::OnNewerPage() {
     m_collection.LoadNewerPage();
+    m_observer.SetOffset(m_collection.GetOffset());
     UploadImages();
     UpdateMainY();
 }
 
 void CameraRollUI::OnOlderPage() {
     m_collection.LoadOlderPage();
+    m_observer.SetOffset(m_collection.GetOffset());
     UploadImages();
     UpdateMainY();
 }

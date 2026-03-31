@@ -147,6 +147,7 @@ if not exist "$(OutDir)config.yml" xcopy /Y "$(ProjectDir)config.yml" "$(OutDir)
     <ClCompile Include="DebugUI.cpp" />
     <ClCompile Include="Image.cpp" />
     <ClCompile Include="ImageCollection.cpp" />
+    <ClCompile Include="ImageFolderObserver.cpp" />
     <ClCompile Include="LaserController.cpp" />
     <ClCompile Include="main.cpp" />
     <ClCompile Include="TriggerableButton.cpp" />
@@ -156,6 +157,7 @@ if not exist "$(OutDir)config.yml" xcopy /Y "$(ProjectDir)config.yml" "$(OutDir)
     <ClInclude Include="DebugUI.h" />
     <ClInclude Include="Image.h" />
     <ClInclude Include="ImageCollection.h" />
+    <ClInclude Include="ImageFolderObserver.h" />
     <ClInclude Include="LaserController.h" />
     <ClInclude Include="Mat3.h" />
     <ClInclude Include="TriggerableButton.h" />

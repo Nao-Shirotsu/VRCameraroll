@@ -51,6 +51,8 @@ static std::string LoadImageFolderFromConfig() {
 }
 
 int main() {
+    SetConsoleOutputCP(CP_UTF8);
+
     vr::EVRInitError err = vr::VRInitError_None;
     vr::IVRSystem* vr_system = vr::VR_Init(&err, vr::VRApplication_Overlay);
     if (err != vr::VRInitError_None) return 1;
@@ -76,12 +78,50 @@ int main() {
     DebugUI debug_ui(camera_roll, laser);
 #endif
 
-    bool prev_trigger  = false;
-    bool prev_any_hit  = false;
-    bool prev_active   = true;  // 初期状態は active
+    // ── IVRInput 初期化 (現在無効: SetActionManifestPath がレガシー GetControllerState を妨害するため) ──
+    // {
+    //     char exe_path_buf[MAX_PATH];
+    //     GetModuleFileNameA(nullptr, exe_path_buf, MAX_PATH);
+    //     std::filesystem::path manifest =
+    //         std::filesystem::path(exe_path_buf).parent_path() / "actions" / "actions.json";
+    //     vr::VRInput()->SetActionManifestPath(manifest.string().c_str());
+    // }
+    // vr::VRActionHandle_t    h_toggle_ui  = vr::k_ulInvalidActionHandle;
+    // vr::VRActionSetHandle_t h_action_set = vr::k_ulInvalidActionSetHandle;
+    // vr::VRInput()->GetActionHandle("/actions/camera_roll/in/toggle_ui", &h_toggle_ui);
+    // vr::VRInput()->GetActionSetHandle("/actions/camera_roll", &h_action_set);
+
+    bool prev_trigger        = false;
+    bool prev_any_hit        = false;
+    bool prev_active         = true;   // 初期状態は active
+    bool g_ui_toggle         = false;  // トグル状態（デフォルト非表示）
+    bool prev_toggle_pressed = false;
 
     while (true) {
         if (GetAsyncKeyState(VK_RETURN) & 0x8000) break;
+
+        // ── IVRInput アクションステート更新 (現在無効) ──
+        // {
+        //     vr::VRActiveActionSet_t active_set = {};
+        //     active_set.ulActionSet = h_action_set;
+        //     vr::VRInput()->UpdateActionState(&active_set, sizeof(active_set), 1);
+        // }
+
+        // ── UIトグル入力（左スティック押し込み、立ち上がりエッジ検出）(現在無効) ──
+        // {
+        //     vr::InputDigitalActionData_t d = {};
+        //     vr::VRInput()->GetDigitalActionData(h_toggle_ui, &d, sizeof(d),
+        //                                         vr::k_ulInvalidInputValueHandle);
+        //     const bool pressed = d.bActive && d.bState;
+        //     if (pressed && !prev_toggle_pressed) {
+        //         g_ui_toggle = !g_ui_toggle;
+        //         printf("UIトグル: %s\n", g_ui_toggle ? "ON" : "OFF");
+        //     }
+        //     prev_toggle_pressed = pressed;
+        // }
+
+        // ── フォルダ変更ポーリング ──
+        camera_roll.PollFolderChanges();
 
         // ── 全コントローラー pose 取得（左右共通）──
         vr::TrackedDevicePose_t poses[vr::k_unMaxTrackedDeviceCount];
@@ -99,12 +139,12 @@ int main() {
         {
             const auto& lm = poses[left_hand].mDeviceToAbsoluteTracking.m;
             const auto& hm = poses[vr::k_unTrackedDeviceIndex_Hmd].mDeviceToAbsoluteTracking.m;
-            // 手のひら法線: 左コントローラーローカルX軸（第0列）
+            // 左コントローラーローカルX軸（第0列 = ワールド空間での(1,0,0)方向）
             const float nx = lm[0][0], ny = lm[1][0], nz = lm[2][0];
             // setactive dir: HMD ローカル+Z軸（正面の逆方向、第2列）
             const float sdx = hm[0][2], sdy = hm[1][2], sdz = hm[2][2];
             const float dot = nx * sdx + ny * sdy + nz * sdz;
-            const bool next_active = (dot >= 0.5f);
+            const bool next_active = g_ui_toggle || (dot >= 0.5f);
             if (next_active != prev_active) {
                 camera_roll.SetActive(next_active);
                 laser.SetActive(next_active);

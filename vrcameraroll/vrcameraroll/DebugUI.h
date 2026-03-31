@@ -15,7 +15,7 @@ class DebugUI {
 public:
     // camera_roll / laser への参照をコンストラクタで受け取る
     DebugUI(CameraRollUI& camera_roll, LaserController& laser);
-    ~DebugUI() = default;
+    ~DebugUI();
 
     // 毎フレーム: 左コントローラー相対に全ボタンを配置する
     // rot/offset は CameraRollUI から取得して渡す
@@ -44,6 +44,13 @@ private:
     float m_row3_y = 0.f; // ポインター回転行
     float m_row4_y = 0.f; // ポインター移動行
     float m_cout_y = 0.f;
+
+    // コントローラー座標軸ライン (X=赤, Y=緑, Z=青)
+    vr::VROverlayHandle_t m_axis[3] = {
+        vr::k_ulOverlayHandleInvalid,
+        vr::k_ulOverlayHandleInvalid,
+        vr::k_ulOverlayHandleInvalid,
+    };
 };
 
 #endif // UI_ADJUST

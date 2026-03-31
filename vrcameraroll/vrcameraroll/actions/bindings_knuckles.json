@@ -4,6 +4,9 @@
     "/actions/camera_roll": {
       "poses": [
         { "output": "/actions/camera_roll/in/right_aim", "path": "/user/hand/right/input/aim" }
+      ],
+      "boolean": [
+        { "output": "/actions/camera_roll/in/toggle_ui", "path": "/user/hand/left/input/thumbstick/click" }
       ]
     }
   }

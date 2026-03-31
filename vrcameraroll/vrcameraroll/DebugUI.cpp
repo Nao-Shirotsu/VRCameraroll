@@ -96,6 +96,18 @@ static std::vector<uint8_t> MakeArrowWithLabel(bool left_arrow, const char* labe
     return pixels;
 }
 
+// 軸ライン用ソリッドカラーテクスチャ (4×100px)
+static std::vector<uint8_t> MakeAxisTexture(uint8_t r, uint8_t g, uint8_t b)
+{
+    constexpr int W = 4, H = 100;
+    std::vector<uint8_t> pixels(W * H * 4);
+    for (int i = 0; i < W * H; ++i) {
+        pixels[i*4+0]=r; pixels[i*4+1]=g;
+        pixels[i*4+2]=b; pixels[i*4+3]=220;
+    }
+    return pixels;
+}
+
 // ────────────────────────────────────────────
 // DebugUI
 // ────────────────────────────────────────────
@@ -215,6 +227,22 @@ DebugUI::DebugUI(CameraRollUI& cam, LaserController& laser)
     // Co ボタン
     m_btn_cout.UploadTexture(MakeLabelTexture("Co"), 64, 64);
     m_btn_cout.Show();
+
+    // コントローラー座標軸ライン (X=赤, Y=緑, Z=青)
+    // テクスチャ 4×100px, 幅 0.004m → 長さ 0.1m
+    constexpr float AXIS_W = 0.004f;
+    constexpr int   AX_W = 4, AX_H = 100;
+    const char* axis_keys[3]  = {"cr.axis_x","cr.axis_y","cr.axis_z"};
+    const char* axis_names[3] = {"Axis X","Axis Y","Axis Z"};
+    const uint8_t axis_rgb[3][3] = {{255,0,0},{0,255,0},{0,0,255}};
+    for (int i = 0; i < 3; ++i) {
+        vr::VROverlay()->CreateOverlay(axis_keys[i], axis_names[i], &m_axis[i]);
+        vr::VROverlay()->SetOverlayWidthInMeters(m_axis[i], AXIS_W);
+        vr::VROverlay()->SetOverlayInputMethod(m_axis[i], vr::VROverlayInputMethod_None);
+        auto tex = MakeAxisTexture(axis_rgb[i][0], axis_rgb[i][1], axis_rgb[i][2]);
+        vr::VROverlay()->SetOverlayRaw(m_axis[i], tex.data(), AX_W, AX_H, 4);
+        vr::VROverlay()->ShowOverlay(m_axis[i]);
+    }
 }
 
 void DebugUI::UpdateTransforms(vr::TrackedDeviceIndex_t left_hand,
@@ -236,6 +264,41 @@ void DebugUI::UpdateTransforms(vr::TrackedDeviceIndex_t left_hand,
     for (int i = 6; i < 12; ++i)
         m_ptr_adj[i].SetTransformTrackedDeviceRelative(left_hand, make(m_adj_xs[i-6], m_row4_y));
     m_btn_cout.SetTransformTrackedDeviceRelative(left_hand, make(0.f, m_cout_y));
+
+    // 軸ライン: コントローラー座標基底をそのまま表示 (rot/offset を適用しない)
+    // テクスチャ上の「上」方向 (col1) を各コントローラー軸に合わせ、
+    // 中心を各軸方向 0.05m (= ライン長 0.1m の半分) に配置する
+    constexpr float HL = 0.05f; // half length
+    // X 軸 (赤): col0=Y軸, col1=X軸, col2=cross(col0,col1)=-Z軸
+    {
+        vr::HmdMatrix34_t t = {};
+        t.m[0][0]= 0; t.m[0][1]= 1; t.m[0][2]= 0; t.m[0][3]= HL;
+        t.m[1][0]= 1; t.m[1][1]= 0; t.m[1][2]= 0; t.m[1][3]= 0;
+        t.m[2][0]= 0; t.m[2][1]= 0; t.m[2][2]=-1; t.m[2][3]= 0;
+        vr::VROverlay()->SetOverlayTransformTrackedDeviceRelative(m_axis[0], left_hand, &t);
+    }
+    // Y 軸 (緑): col0=X軸, col1=Y軸, col2=cross(col0,col1)=+Z軸
+    {
+        vr::HmdMatrix34_t t = {};
+        t.m[0][0]= 1; t.m[0][1]= 0; t.m[0][2]= 0; t.m[0][3]= 0;
+        t.m[1][0]= 0; t.m[1][1]= 1; t.m[1][2]= 0; t.m[1][3]= HL;
+        t.m[2][0]= 0; t.m[2][1]= 0; t.m[2][2]= 1; t.m[2][3]= 0;
+        vr::VROverlay()->SetOverlayTransformTrackedDeviceRelative(m_axis[1], left_hand, &t);
+    }
+    // Z 軸 (青): col0=X軸, col1=Z軸, col2=cross(col0,col1)=-Y軸
+    {
+        vr::HmdMatrix34_t t = {};
+        t.m[0][0]= 1; t.m[0][1]= 0; t.m[0][2]= 0; t.m[0][3]= 0;
+        t.m[1][0]= 0; t.m[1][1]= 0; t.m[1][2]=-1; t.m[1][3]= 0;
+        t.m[2][0]= 0; t.m[2][1]= 1; t.m[2][2]= 0; t.m[2][3]= HL;
+        vr::VROverlay()->SetOverlayTransformTrackedDeviceRelative(m_axis[2], left_hand, &t);
+    }
+}
+
+DebugUI::~DebugUI() {
+    for (auto h : m_axis)
+        if (h != vr::k_ulOverlayHandleInvalid)
+            vr::VROverlay()->DestroyOverlay(h);
 }
 
 std::vector<TriggerableButton*> DebugUI::Buttons() {

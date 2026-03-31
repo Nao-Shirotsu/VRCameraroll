@@ -1,5 +1,6 @@
 #pragma once
 #include "ImageCollection.h"
+#include "ImageFolderObserver.h"
 #include "TriggerableButton.h"
 #include "Mat3.h"
 #include <array>
@@ -15,6 +16,9 @@ public:
     ~CameraRollUI();
 
     void LoadImages(const std::filesystem::path& folder);
+
+    // メインループから毎フレーム呼ぶ。フォルダ変更があれば自動的に再読み込みする。
+    void PollFolderChanges();
 
     // 毎フレーム: 左コントローラー相対にオーバーレイを配置する
     void UpdateTransforms(vr::TrackedDeviceIndex_t left_hand);
@@ -53,7 +57,9 @@ public:
 private:
     bool m_active = true;
 
-    ImageCollection m_collection;
+    ImageCollection      m_collection;
+    ImageFolderObserver  m_observer;
+    std::filesystem::path m_folder;
 
     // 画像オーバーレイ (overlays[0]=メイン, [1..N-1]=サブ)
     std::array<vr::VROverlayHandle_t, N> m_img_overlays;
@@ -79,6 +85,7 @@ private:
 
     void UploadImages();
     void UpdateMainY();
+    void ReloadAtOffset(int offset);
     void OnNewerPage();
     void OnOlderPage();
 };

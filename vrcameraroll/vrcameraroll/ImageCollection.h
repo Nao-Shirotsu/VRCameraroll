@@ -31,6 +31,8 @@ public:
 
     int LoadedCount() const;
 
+    int GetOffset() const { return m_offset; }
+
 private:
     std::array<Image, N> m_images;
     Iterator              m_main_it;
