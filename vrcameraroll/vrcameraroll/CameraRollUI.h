@@ -65,7 +65,7 @@ private:
     float m_rot_y    =  3.14159265f / 2.0f;
     float m_rot_z    =  0.0f;
     float m_offset_x = -0.1f;
-    float m_offset_y =  0.0f;
+    float m_offset_y =  0.010000f;
     float m_offset_z =  0.0f;
 
     // レイアウト

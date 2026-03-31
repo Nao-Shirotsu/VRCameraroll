@@ -1,5 +1,5 @@
 #pragma once
-#ifdef _DEBUG
+#ifdef UI_ADJUST
 
 #include "TriggerableButton.h"
 #include "Mat3.h"
@@ -46,4 +46,4 @@ private:
     float m_cout_y = 0.f;
 };
 
-#endif // _DEBUG
+#endif // UI_ADJUST

@@ -1,5 +1,5 @@
 #include "DebugUI.h"
-#ifdef _DEBUG
+#ifdef UI_ADJUST
 
 #include "CameraRollUI.h"
 #include "LaserController.h"
@@ -246,4 +246,4 @@ std::vector<TriggerableButton*> DebugUI::Buttons() {
     return result;
 }
 
-#endif // _DEBUG
+#endif // UI_ADJUST

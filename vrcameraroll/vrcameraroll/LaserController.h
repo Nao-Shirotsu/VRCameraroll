@@ -26,6 +26,11 @@ public:
     bool IsTriggerPressed(vr::IVRSystem* vr_system,
                           vr::TrackedDeviceIndex_t right_hand) const;
 
+    // ヒット時にドット overlay を当たり点に表示、非ヒット時は非表示
+    void UpdateHitDot(const vr::VROverlayIntersectionResults_t* res,
+                      vr::TrackedDeviceIndex_t right_hand,
+                      const vr::TrackedDevicePose_t* pose);
+
     // DebugUI から ptr_rot / ptr_t を操作するためのアクセサ
     void RotateX(float delta) { m_rot = m_rot * Mat3::rotX(delta); }
     void RotateY(float delta) { m_rot = m_rot * Mat3::rotY(delta); }
@@ -39,9 +44,10 @@ public:
 
 private:
     vr::VROverlayHandle_t m_ptr_line = vr::k_ulOverlayHandleInvalid;
+    vr::VROverlayHandle_t m_hit_dot  = vr::k_ulOverlayHandleInvalid;
 
     Mat3  m_rot;
     float m_tx = -0.020000f;
-    float m_ty = -0.090000f;
+    float m_ty = -0.100000f;
     float m_tz = -0.062000f;
 };
