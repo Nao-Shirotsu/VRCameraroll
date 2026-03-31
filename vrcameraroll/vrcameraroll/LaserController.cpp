@@ -3,13 +3,13 @@
 #include <cstring>
 
 // ────────────────────────────────────────────
-// ポインターライン用テクスチャ（4x1000 px 赤ライン）
+// ポインターライン用テクスチャ（4x4000 px 緑ライン）
 // ────────────────────────────────────────────
 static std::vector<uint8_t> MakePointerTexture() {
-    constexpr int W = 4, H = 1000; // aspect 250:1 → 太さ0.002m × 250 = 0.5m
+    constexpr int W = 4, H = 4000; // aspect 1000:1 → 太さ0.001m × 1000 = 1.0m
     std::vector<uint8_t> pixels(W * H * 4);
     for (int i = 0; i < W * H; ++i) {
-        pixels[i*4+0] = 255; pixels[i*4+1] = 60;
+        pixels[i*4+0] = 60;  pixels[i*4+1] = 255;
         pixels[i*4+2] = 60;  pixels[i*4+3] = 220;
     }
     return pixels;
@@ -42,8 +42,8 @@ LaserController::LaserController() {
     // ポインターライン overlay
     vr::VROverlay()->CreateOverlay("camera_roll.ptr_line", "Pointer Line", &m_ptr_line);
     auto ptex = MakePointerTexture();
-    vr::VROverlay()->SetOverlayRaw(m_ptr_line, ptex.data(), 4, 1000, 4);
-    vr::VROverlay()->SetOverlayWidthInMeters(m_ptr_line, 0.002f); // 太さ2mm, 長さ = 0.002 × 250 = 0.5m
+    vr::VROverlay()->SetOverlayRaw(m_ptr_line, ptex.data(), 4, 4000, 4);
+    vr::VROverlay()->SetOverlayWidthInMeters(m_ptr_line, 0.0005f); // 太さ1mm, 長さ = 0.001 × 1000 = 1.0m
     vr::VROverlay()->ShowOverlay(m_ptr_line);
 
     // ヒットドット overlay（最初は非表示）
@@ -53,9 +53,9 @@ LaserController::LaserController() {
     vr::VROverlay()->SetOverlayWidthInMeters(m_hit_dot, 0.02f);
 
     // デフォルト回転行列（キャリブレーション済み値）
-    m_rot.m[0][0]=+0.028238f; m_rot.m[0][1]=+0.999467f; m_rot.m[0][2]=-0.016173f;
-    m_rot.m[1][0]=-0.774502f; m_rot.m[1][1]=+0.032105f; m_rot.m[1][2]=+0.631752f;
-    m_rot.m[2][0]=+0.631936f; m_rot.m[2][1]=-0.005313f; m_rot.m[2][2]=+0.774998f;
+    m_rot.m[0][0]=+0.082687f; m_rot.m[0][1]=+0.996505f; m_rot.m[0][2]=-0.011556f;
+    m_rot.m[1][0]=-0.860930f; m_rot.m[1][1]=+0.077268f; m_rot.m[1][2]=+0.502815f;
+    m_rot.m[2][0]=+0.501952f; m_rot.m[2][1]=-0.031626f; m_rot.m[2][2]=+0.864313f;
 }
 
 LaserController::~LaserController() {
@@ -72,8 +72,8 @@ void LaserController::UpdatePointerTransform(vr::TrackedDeviceIndex_t right_hand
     // 判定レイ方向 (BuildIntersectionParams) は m_rot の列2 (Z軸) を使う。
     // 見た目と判定を一致させるため、overlay の local Y を列2、local Z を -列1 にする。
     // (列0は変えず、列1↔列2を交換して符号補正することで行列式=+1を保つ)
-    // overlay 中心 = レイ原点 + 0.25m × レーザー方向 (-m_rot 列2)
-    constexpr float half_len = 0.25f;
+    // overlay 中心 = レイ原点 + 0.5m × レーザー方向 (-m_rot 列2)
+    constexpr float half_len = 0.5f;
     t.m[0][0]= m_rot.m[0][0]; t.m[0][1]= m_rot.m[0][2]; t.m[0][2]=-m_rot.m[0][1]; t.m[0][3]=m_tx + half_len*(-m_rot.m[0][2]);
     t.m[1][0]= m_rot.m[1][0]; t.m[1][1]= m_rot.m[1][2]; t.m[1][2]=-m_rot.m[1][1]; t.m[1][3]=m_ty + half_len*(-m_rot.m[1][2]);
     t.m[2][0]= m_rot.m[2][0]; t.m[2][1]= m_rot.m[2][2]; t.m[2][2]=-m_rot.m[2][1]; t.m[2][3]=m_tz + half_len*(-m_rot.m[2][2]);
@@ -150,9 +150,10 @@ void LaserController::UpdateHitDot(const vr::VROverlayIntersectionResults_t* res
         t.m[r][1] = m_rot.m[r][1];
         t.m[r][2] = m_rot.m[r][2];
     }
-    t.m[0][3] = lx;
-    t.m[1][3] = ly;
-    t.m[2][3] = lz;
+    constexpr float kDotOffset = 0.003f; // z-fighting 回避: レーザー逆方向に 3mm
+    t.m[0][3] = lx + m_rot.m[0][2] * kDotOffset;
+    t.m[1][3] = ly + m_rot.m[1][2] * kDotOffset;
+    t.m[2][3] = lz + m_rot.m[2][2] * kDotOffset;
 
     vr::VROverlay()->SetOverlayTransformTrackedDeviceRelative(
         m_hit_dot, right_hand, &t);

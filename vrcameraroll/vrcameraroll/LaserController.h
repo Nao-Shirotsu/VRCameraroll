@@ -48,6 +48,6 @@ private:
 
     Mat3  m_rot;
     float m_tx = -0.020000f;
-    float m_ty = -0.100000f;
-    float m_tz = -0.062000f;
+    float m_ty =  0.120000f;
+    float m_tz =  0.258000f;
 };
