@@ -1,0 +1,9 @@
+# VRCameraroll 設定ファイル
+# -----------------------------------------------
+# image_folder: 表示したい画像フォルダのパスを指定してください。
+#   %USERPROFILE% などの環境変数が使えます。
+#   例) %USERPROFILE%\Pictures\VRChat
+#       C:\Users\YourName\Pictures\VRChat\2026-03
+# -----------------------------------------------
+
+image_folder: %USERPROFILE%\Pictures\VRChat

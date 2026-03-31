@@ -115,7 +115,8 @@
       <AdditionalDependencies>$(CoreLibraryDependencies);%(AdditionalDependencies); openvr_api.lib; opengl32.lib; gdi32.lib</AdditionalDependencies>
     </Link>
     <PostBuildEvent>
-      <Command>xcopy /Y /E "$(ProjectDir)actions" "$(OutDir)actions\"</Command>
+      <Command>xcopy /Y /E "$(ProjectDir)actions" "$(OutDir)actions\"
+if not exist "$(OutDir)config.yml" xcopy /Y "$(ProjectDir)config.yml" "$(OutDir)"</Command>
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
@@ -137,7 +138,8 @@
       <AdditionalDependencies>$(CoreLibraryDependencies);%(AdditionalDependencies); openvr_api.lib; opengl32.lib; gdi32.lib</AdditionalDependencies>
     </Link>
     <PostBuildEvent>
-      <Command>xcopy /Y /E "$(ProjectDir)actions" "$(OutDir)actions\"</Command>
+      <Command>xcopy /Y /E "$(ProjectDir)actions" "$(OutDir)actions\"
+if not exist "$(OutDir)config.yml" xcopy /Y "$(ProjectDir)config.yml" "$(OutDir)"</Command>
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemGroup>
