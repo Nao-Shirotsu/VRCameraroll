@@ -38,6 +38,9 @@ public:
     // 当たり判定ループに渡すボタンリスト（ページ送り + サブ画像）
     std::vector<TriggerableButton*> Buttons();
 
+    void SetActive(bool active);
+    bool IsActive() const { return m_active; }
+
     // イベントポーリング用（メインオーバーレイのハンドル）
     vr::VROverlayHandle_t MainOverlayHandle() const { return m_img_overlays[0]; }
 
@@ -48,6 +51,8 @@ public:
     static constexpr float SUB_Y  = -0.03f;
 
 private:
+    bool m_active = true;
+
     ImageCollection m_collection;
 
     // 画像オーバーレイ (overlays[0]=メイン, [1..N-1]=サブ)

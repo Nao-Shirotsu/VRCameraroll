@@ -164,7 +164,19 @@ void CameraRollUI::UpdateMainY() {
     m_img_layout[0].y = sub_top + 0.005f + main_height / 2.0f;
 }
 
+void CameraRollUI::SetActive(bool active) {
+    m_active = active;
+    auto* ovr = vr::VROverlay();
+    for (auto h : m_img_overlays) {
+        if (active) ovr->ShowOverlay(h);
+        else        ovr->HideOverlay(h);
+    }
+    if (active) { m_btn_newer.Show(); m_btn_older.Show(); }
+    else        { m_btn_newer.Hide(); m_btn_older.Hide(); }
+}
+
 void CameraRollUI::UpdateTransforms(vr::TrackedDeviceIndex_t left_hand) {
+    if (!m_active) return;
     if (left_hand == vr::k_unTrackedDeviceIndexInvalid) return;
 
     auto make = [&](float x, float y) {
@@ -190,6 +202,7 @@ void CameraRollUI::UpdateTransforms(vr::TrackedDeviceIndex_t left_hand) {
 }
 
 std::vector<TriggerableButton*> CameraRollUI::Buttons() {
+    if (!m_active) return {};
     std::vector<TriggerableButton*> result;
     result.push_back(&m_btn_newer);
     result.push_back(&m_btn_older);

@@ -42,7 +42,12 @@ public:
     // 現在値を stdout に出力（"Co" ボタン用）
     void PrintParams() const;
 
+    void SetActive(bool active);
+    bool IsActive() const { return m_active; }
+
 private:
+    bool m_active = true;
+
     vr::VROverlayHandle_t m_ptr_line = vr::k_ulOverlayHandleInvalid;
     vr::VROverlayHandle_t m_hit_dot  = vr::k_ulOverlayHandleInvalid;
 

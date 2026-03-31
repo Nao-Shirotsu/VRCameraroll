@@ -27,8 +27,9 @@ int main() {
     DebugUI debug_ui(camera_roll, laser);
 #endif
 
-    bool prev_trigger = false;
-    bool prev_any_hit = false;
+    bool prev_trigger      = false;
+    bool prev_left_trigger = false;
+    bool prev_any_hit      = false;
 
     while (true) {
         if (GetAsyncKeyState(VK_RETURN) & 0x8000) break;
@@ -36,6 +37,22 @@ int main() {
         // ── 左コントローラー取得 ──
         vr::TrackedDeviceIndex_t left_hand =
             vr_system->GetTrackedDeviceIndexForControllerRole(vr::TrackedControllerRole_LeftHand);
+
+        // ── 左トリガーでアクティブ状態をトグル ──
+        bool left_trigger_now = false;
+        if (left_hand != vr::k_unTrackedDeviceIndexInvalid) {
+            vr::VRControllerState_t ls = {};
+            if (vr_system->GetControllerState(left_hand, &ls, sizeof(ls)))
+                left_trigger_now = (ls.ulButtonPressed &
+                    vr::ButtonMaskFromId(vr::k_EButton_SteamVR_Trigger)) != 0;
+        }
+        if (left_trigger_now && !prev_left_trigger) {
+            const bool next = !camera_roll.IsActive();
+            camera_roll.SetActive(next);
+            laser.SetActive(next);
+            printf("overlay %s\n", next ? "ON" : "OFF");
+        }
+        prev_left_trigger = left_trigger_now;
 
         camera_roll.UpdateTransforms(left_hand);
 

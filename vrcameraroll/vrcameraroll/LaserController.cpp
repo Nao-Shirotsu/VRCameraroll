@@ -65,7 +65,19 @@ LaserController::~LaserController() {
         vr::VROverlay()->DestroyOverlay(m_hit_dot);
 }
 
+void LaserController::SetActive(bool active) {
+    m_active = active;
+    auto* ovr = vr::VROverlay();
+    if (active) {
+        ovr->ShowOverlay(m_ptr_line);
+    } else {
+        ovr->HideOverlay(m_ptr_line);
+        ovr->HideOverlay(m_hit_dot);
+    }
+}
+
 void LaserController::UpdatePointerTransform(vr::TrackedDeviceIndex_t right_hand) {
+    if (!m_active) return;
     if (right_hand == vr::k_unTrackedDeviceIndexInvalid) return;
     vr::HmdMatrix34_t t = {};
     // ポインターラインは縦長 (4x256px) なので長軸 = local Y。
@@ -110,6 +122,7 @@ TriggerableButton* LaserController::HitTest(
     const vr::VROverlayIntersectionParams_t& params,
     vr::VROverlayIntersectionResults_t* out) const
 {
+    if (!m_active) return nullptr;
     for (auto* btn : buttons) {
         if (btn && btn->Intersected(params, out))
             return btn;
@@ -120,6 +133,7 @@ TriggerableButton* LaserController::HitTest(
 bool LaserController::IsTriggerPressed(vr::IVRSystem* vr_system,
                                         vr::TrackedDeviceIndex_t right_hand) const
 {
+    if (!m_active) return false;
     if (right_hand == vr::k_unTrackedDeviceIndexInvalid) return false;
     vr::VRControllerState_t ctrl = {};
     return vr_system->GetControllerState(right_hand, &ctrl, sizeof(ctrl))
@@ -129,6 +143,7 @@ bool LaserController::IsTriggerPressed(vr::IVRSystem* vr_system,
 void LaserController::UpdateHitDot(const vr::VROverlayIntersectionResults_t* res,
                                     vr::TrackedDeviceIndex_t right_hand,
                                     const vr::TrackedDevicePose_t* pose) {
+    if (!m_active) return;
     if (!res || !pose) {
         vr::VROverlay()->HideOverlay(m_hit_dot);
         return;
