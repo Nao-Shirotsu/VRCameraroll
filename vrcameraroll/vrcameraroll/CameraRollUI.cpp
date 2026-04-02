@@ -1,9 +1,24 @@
+#include <Windows.h>
 #include "CameraRollUI.h"
 #include <algorithm>
 #include <cstring>
+#include <cstdio>
 
 static constexpr float BAR_FRAC      = 0.04f; // iPad風グレー帯の高さ比率（画像高さに対する割合）
 static constexpr float SIDE_PAD_FRAC = 0.03f; // 左右グレー帯の幅比率（画像幅に対する割合）
+
+// ────────────────────────────────────────────
+// ナビゲーション用ヘルパー
+// ────────────────────────────────────────────
+
+static const std::vector<std::wstring> kImageExts = { L".png", L".jpg", L".jpeg", L".bmp" };
+
+static bool IsImageFile(const std::filesystem::path& p) {
+    auto ext = p.extension().wstring();
+    std::transform(ext.begin(), ext.end(), ext.begin(), ::towlower);
+    for (const auto& e : kImageExts) if (ext == e) return true;
+    return false;
+}
 
 // ────────────────────────────────────────────
 // 内部テクスチャ生成ヘルパー
@@ -29,10 +44,10 @@ static void ApplyRoundedCorners(std::vector<uint8_t>& pixels, int w, int h, int 
 }
 
 static std::vector<uint8_t> MakeCroppedThumbnail(const Image& img, int scale = 8) {
-    int crop_size = std::min(img.width, img.height);
+    int crop_size = min(img.width, img.height);
     int crop_x    = (img.width  - crop_size) / 2;
     int crop_y    = (img.height - crop_size) / 2;
-    int tw        = std::max(1, crop_size / scale);
+    int tw        = max(1, crop_size / scale);
     std::vector<uint8_t> out(tw * tw * 4, 0);
     for (int y = 0; y < tw; ++y) {
         for (int x = 0; x < tw; ++x) {
@@ -55,7 +70,7 @@ static std::vector<uint8_t> MakeCroppedThumbnail(const Image& img, int scale = 8
         }
     }
     // 丸角（サムネイルサイズの約12.5%）
-    ApplyRoundedCorners(out, tw, tw, std::max(1, tw / 8));
+    ApplyRoundedCorners(out, tw, tw, max(1, tw / 8));
     return out;
 }
 
@@ -106,8 +121,8 @@ static void UploadGrey(vr::VROverlayHandle_t overlay) {
 struct PixelBuffer { std::vector<uint8_t> pixels; int w, h; };
 
 static PixelBuffer MakeMainImageTexture(const Image& img) {
-    int bar_h    = std::max(8,  (int)(img.height * BAR_FRAC));
-    int side_pad = std::max(4,  (int)(img.width  * SIDE_PAD_FRAC));
+    int bar_h    = max(8,  (int)(img.height * BAR_FRAC));
+    int side_pad = max(4,  (int)(img.width  * SIDE_PAD_FRAC));
     int w = img.width  + 2 * side_pad;
     int h = img.height + 2 * bar_h;
     std::vector<uint8_t> out(w * h * 4, 0);
@@ -126,7 +141,7 @@ static PixelBuffer MakeMainImageTexture(const Image& img) {
     }
 
     // 外枠に丸角
-    int radius = std::min({ bar_h, side_pad, w / 20, h / 20 });
+    int radius = min(min(min(bar_h, side_pad), w / 20), h / 20 );
     ApplyRoundedCorners(out, w, h, radius);
 
     return { std::move(out), w, h };
@@ -141,6 +156,126 @@ static std::vector<uint8_t> MakeStripBgTexture(int w, int h) {
     }
     ApplyRoundedCorners(pixels, w, h, h / 3);
     return pixels;
+}
+
+// フォルダアイコンテクスチャを GDI で生成する（64×64 RGBA）
+// is_back=true: 青灰色（戻るフォルダ）, false: 黄色（通常フォルダ）
+static std::vector<uint8_t> MakeFolderTexture(const std::wstring& name, bool is_back) {
+    constexpr int W = 64, H = 64;
+
+    // DIBSection を作成（top-down: biHeight 負値）
+    BITMAPINFO bmi = {};
+    bmi.bmiHeader.biSize        = sizeof(BITMAPINFOHEADER);
+    bmi.bmiHeader.biWidth       = W;
+    bmi.bmiHeader.biHeight      = -H; // top-down
+    bmi.bmiHeader.biPlanes      = 1;
+    bmi.bmiHeader.biBitCount    = 32;
+    bmi.bmiHeader.biCompression = BI_RGB;
+
+    void* bits = nullptr;
+    HDC hdc = CreateCompatibleDC(nullptr);
+    HBITMAP hbm = CreateDIBSection(hdc, &bmi, DIB_RGB_COLORS, &bits, nullptr, 0);
+    HGDIOBJ hbm_old = SelectObject(hdc, hbm);
+
+    // 背景: RGB(30,30,35)
+    {
+        HBRUSH hbr = CreateSolidBrush(RGB(30, 30, 35));
+        RECT rc = { 0, 0, W, H };
+        FillRect(hdc, &rc, hbr);
+        DeleteObject(hbr);
+    }
+
+    // フォルダ形状を描く
+    if (!is_back) {
+        // 通常フォルダ: 黄色系
+        // タブ
+        HBRUSH hbr_tab = CreateSolidBrush(RGB(195, 150, 30));
+        RECT tab_rc = { 5, 8, 26, 17 };
+        FillRect(hdc, &tab_rc, hbr_tab);
+        DeleteObject(hbr_tab);
+        // ボディ
+        HBRUSH hbr_body = CreateSolidBrush(RGB(235, 185, 45));
+        RECT body_rc = { 3, 15, 61, 47 };
+        FillRect(hdc, &body_rc, hbr_body);
+        DeleteObject(hbr_body);
+        // ハイライト
+        HBRUSH hbr_hl = CreateSolidBrush(RGB(255, 215, 90));
+        RECT hl_rc = { 3, 15, 61, 20 };
+        FillRect(hdc, &hl_rc, hbr_hl);
+        DeleteObject(hbr_hl);
+    } else {
+        // 戻るフォルダ: 青灰色系
+        HBRUSH hbr_tab = CreateSolidBrush(RGB(80, 100, 130));
+        RECT tab_rc = { 5, 8, 26, 17 };
+        FillRect(hdc, &tab_rc, hbr_tab);
+        DeleteObject(hbr_tab);
+        HBRUSH hbr_body = CreateSolidBrush(RGB(100, 125, 165));
+        RECT body_rc = { 3, 15, 61, 47 };
+        FillRect(hdc, &body_rc, hbr_body);
+        DeleteObject(hbr_body);
+        HBRUSH hbr_hl = CreateSolidBrush(RGB(130, 155, 195));
+        RECT hl_rc = { 3, 15, 61, 20 };
+        FillRect(hdc, &hl_rc, hbr_hl);
+        DeleteObject(hbr_hl);
+    }
+
+    // テキスト描画
+    SetBkMode(hdc, TRANSPARENT);
+    SetTextColor(hdc, RGB(230, 230, 230));
+
+    bool font_created = false;
+    HFONT hfont = CreateFontW(
+        -11, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+        CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE,
+        L"Yu Gothic UI");
+    if (hfont) {
+        font_created = true;
+    } else {
+        hfont = (HFONT)GetStockObject(DEFAULT_GUI_FONT);
+    }
+    HGDIOBJ hfont_old = SelectObject(hdc, hfont);
+
+    std::wstring label;
+    if (is_back) {
+        label = L"\u2191"; // ↑
+    } else {
+        label = name;
+        if (label.size() > 7) {
+            label = label.substr(0, 6) + L"..";
+        }
+    }
+
+    RECT text_rc = { 1, 48, 63, 63 };
+    DrawTextW(hdc, label.c_str(), -1, &text_rc,
+        DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+
+    // フォントを元に戻してから削除（ストックオブジェクトは削除しない）
+    SelectObject(hdc, hfont_old);
+    if (font_created) DeleteObject(hfont);
+
+    // GDI フラッシュ
+    GdiFlush();
+
+    // BGRA → RGBA 変換、A=255 に設定
+    std::vector<uint8_t> result(W * H * 4);
+    const uint8_t* src = reinterpret_cast<const uint8_t*>(bits);
+    for (int i = 0; i < W * H; ++i) {
+        result[i * 4 + 0] = src[i * 4 + 2]; // R ← B (GDI は BGR)
+        result[i * 4 + 1] = src[i * 4 + 1]; // G
+        result[i * 4 + 2] = src[i * 4 + 0]; // B ← R
+        result[i * 4 + 3] = 255;             // A
+    }
+
+    // 丸角
+    ApplyRoundedCorners(result, W, H, 8);
+
+    // クリーンアップ
+    SelectObject(hdc, hbm_old);
+    DeleteObject(hbm);
+    DeleteDC(hdc);
+
+    return result;
 }
 
 // ────────────────────────────────────────────
@@ -198,22 +333,22 @@ CameraRollUI::CameraRollUI()
     m_btn_newer.Show();
     m_btn_older.Show();
 
-    // サブ画像 TriggerableButton
+    // サブ画像 TriggerableButton: スロットタイプに応じてナビゲーションまたはメイン選択
     for (int i = 1; i < N; ++i) {
-        m_sub_btns.emplace_back(m_img_overlays[i], [this, idx = i - 1]{
-            m_collection.SetMain(m_collection.Images().begin() + idx);
-            const Image& mi = m_collection.Main();
-            if (mi.IsLoaded()) {
-                auto buf = MakeMainImageTexture(mi);
-                vr::VROverlay()->SetOverlayRaw(m_img_overlays[0],
-                    buf.pixels.data(), buf.w, buf.h, 4);
-            }
-            UpdateMainY();
+        m_sub_btns.emplace_back(m_img_overlays[i], [this, slot = i - 1]{
+            int nav_idx = m_nav_offset + slot;
+            if (nav_idx >= (int)m_nav_items.size()) return;
+            const NavItem& item = m_nav_items[nav_idx];
+            if (item.type == SlotType::BackDir || item.type == SlotType::SubDir)
+                NavigateInto(item.path);
+            else if (item.type == SlotType::Image)
+                SetMainImage(nav_idx);
         });
     }
 }
 
 CameraRollUI::~CameraRollUI() {
+    m_observer.Stop();
     vr::VROverlay()->DestroyOverlay(m_bg_overlay);
     for (int i = 0; i < N; ++i)
         vr::VROverlay()->DestroyOverlay(m_img_overlays[i]);
@@ -221,54 +356,230 @@ CameraRollUI::~CameraRollUI() {
 }
 
 void CameraRollUI::LoadImages(const std::filesystem::path& folder) {
-    m_folder = folder;
-    m_collection.LoadFromFolder(folder);
-    UploadImages();
-    UpdateMainY();
-    UpdateArrowColors();
-    m_observer.Start(folder, 0, [this](int offset) { ReloadAtOffset(offset); });
+    m_observer.Stop();
+    try { m_root_dir = std::filesystem::weakly_canonical(folder); }
+    catch (...) { m_root_dir = folder; }
+    m_current_dir  = m_root_dir;
+    m_nav_offset   = 0;
+    m_main_image.Unload();
+    m_main_nav_idx = -1;
+    RefreshAndDisplay();
 }
 
 void CameraRollUI::PollFolderChanges() {
     m_observer.Poll();
 }
 
-void CameraRollUI::UploadImages() {
-    // 画像が切り替わったらホバー状態をリセット（デフォルトはグレーアウト）
+// ────────────────────────────────────────────
+// ナビゲーション private helpers
+// ────────────────────────────────────────────
+
+void CameraRollUI::RefreshNavItems() {
+    m_nav_items.clear();
+
+    std::error_code ec;
+    if (!std::filesystem::exists(m_current_dir, ec)) return;
+
+    // 戻るスロット（root でない場合）
+    if (m_current_dir != m_root_dir) {
+        NavItem back;
+        back.type         = SlotType::BackDir;
+        back.path         = m_current_dir.parent_path();
+        back.display_name = L"..";
+        m_nav_items.push_back(std::move(back));
+    }
+
+    // サブディレクトリと画像を収集
+    std::vector<std::filesystem::path> subdirs;
+    std::vector<std::pair<std::filesystem::file_time_type, std::filesystem::path>> images;
+
+    for (const auto& entry : std::filesystem::directory_iterator(m_current_dir, ec)) {
+        if (ec) break;
+        std::error_code ec2;
+        if (entry.is_directory(ec2)) {
+            subdirs.push_back(entry.path());
+        } else if (entry.is_regular_file(ec2) && IsImageFile(entry.path())) {
+            std::filesystem::file_time_type mtime = entry.last_write_time(ec2);
+            images.push_back({ mtime, entry.path() });
+        }
+    }
+
+    // サブディレクトリを名前昇順ソート
+    std::sort(subdirs.begin(), subdirs.end(), [](const auto& a, const auto& b) {
+        return a.filename().wstring() < b.filename().wstring();
+    });
+
+    // 画像を更新日時の降順ソート（最新が先）
+    std::sort(images.begin(), images.end(), [](const auto& a, const auto& b) {
+        return a.first > b.first;
+    });
+
+    // サブディレクトリアイテムを追加
+    for (const auto& sd : subdirs) {
+        NavItem item;
+        item.type         = SlotType::SubDir;
+        item.path         = sd;
+        item.display_name = sd.filename().wstring();
+        m_nav_items.push_back(std::move(item));
+    }
+
+    // 画像アイテムを追加
+    for (const auto& [mtime, p] : images) {
+        NavItem item;
+        item.type         = SlotType::Image;
+        item.path         = p;
+        item.display_name = L"";
+        m_nav_items.push_back(std::move(item));
+    }
+
+    std::printf("NavItems: %zu items in: %s\n",
+        m_nav_items.size(),
+        m_current_dir.u8string().c_str());
+}
+
+void CameraRollUI::UploadNavSlots() {
+    // ホバーリセット
     m_hovered_sub_idx = -1;
     constexpr float DIM = 0.35f;
     for (int i = 1; i < N; ++i)
         vr::VROverlay()->SetOverlayColor(m_img_overlays[i], DIM, DIM, DIM);
 
-    const Image& main_img = m_collection.Main();
-    if (main_img.IsLoaded()) {
-        auto buf = MakeMainImageTexture(main_img);
+    // 既存スロット画像をアンロード
+    for (auto& si : m_slot_images) si.Unload();
+
+    for (int slot = 0; slot < N - 1; ++slot) {
+        int nav_idx = m_nav_offset + slot;
+        vr::VROverlayHandle_t overlay = m_img_overlays[slot + 1];
+
+        if (nav_idx >= (int)m_nav_items.size()) {
+            UploadGrey(overlay);
+            continue;
+        }
+
+        const NavItem& item = m_nav_items[nav_idx];
+
+        if (item.type == SlotType::BackDir || item.type == SlotType::SubDir) {
+            bool is_back = (item.type == SlotType::BackDir);
+            auto tex = MakeFolderTexture(item.display_name, is_back);
+            vr::VROverlay()->SetOverlayRaw(overlay, tex.data(), 64, 64, 4);
+        } else {
+            // Image スロット
+            m_slot_images[slot].LoadFromFile(item.path);
+            if (m_slot_images[slot].IsLoaded()) {
+                auto thumb = MakeCroppedThumbnail(m_slot_images[slot], 8);
+                int tw = min(m_slot_images[slot].width,
+                                  m_slot_images[slot].height) / 8;
+                vr::VROverlay()->SetOverlayRaw(overlay, thumb.data(), tw, tw, 4);
+            } else {
+                UploadGrey(overlay);
+            }
+        }
+    }
+
+    UpdateArrowColors();
+}
+
+void CameraRollUI::RefreshAndDisplay() {
+    RefreshNavItems();
+    UploadNavSlots();
+
+    // 最初の Image アイテムを探してメイン表示
+    int first_img_idx = -1;
+    for (int i = 0; i < (int)m_nav_items.size(); ++i) {
+        if (m_nav_items[i].type == SlotType::Image) {
+            first_img_idx = i;
+            break;
+        }
+    }
+
+    if (first_img_idx >= 0) {
+        SetMainImage(first_img_idx);
+        m_observer.Start(m_current_dir, 0, [this](int) { ReloadCurrentDir(); });
+    } else {
+        UploadGrey(m_img_overlays[0]);
+        UpdateMainY();
+    }
+}
+
+void CameraRollUI::NavigateInto(const std::filesystem::path& dir) {
+    m_observer.Stop();
+    try { m_current_dir = std::filesystem::weakly_canonical(dir); }
+    catch (...) { m_current_dir = dir; }
+    m_nav_offset   = 0;
+    m_main_image.Unload();
+    m_main_nav_idx = -1;
+    RefreshAndDisplay();
+}
+
+void CameraRollUI::ReloadCurrentDir() {
+    // 以前のメイン画像パスを保存
+    std::filesystem::path prev_main_path;
+    if (m_main_nav_idx >= 0 && m_main_nav_idx < (int)m_nav_items.size()) {
+        prev_main_path = m_nav_items[m_main_nav_idx].path;
+    }
+
+    RefreshNavItems();
+
+    // nav_offset をクランプ
+    int max_offset = max(0, (int)m_nav_items.size() - (N - 1));
+    m_nav_offset   = min(m_nav_offset, max_offset);
+
+    UploadNavSlots();
+
+    // 前のメイン画像を再探索
+    int new_main = -1;
+    if (!prev_main_path.empty()) {
+        for (int i = 0; i < (int)m_nav_items.size(); ++i) {
+            if (m_nav_items[i].type == SlotType::Image &&
+                m_nav_items[i].path == prev_main_path)
+            {
+                new_main = i;
+                break;
+            }
+        }
+    }
+
+    // 見つからなければ最初の Image を使用
+    if (new_main < 0) {
+        for (int i = 0; i < (int)m_nav_items.size(); ++i) {
+            if (m_nav_items[i].type == SlotType::Image) {
+                new_main = i;
+                break;
+            }
+        }
+    }
+
+    if (new_main >= 0) {
+        SetMainImage(new_main);
+    } else {
+        // 画像が一枚もない
+        m_main_image.Unload();
+        m_main_nav_idx = -1;
+        UploadGrey(m_img_overlays[0]);
+        UpdateMainY();
+    }
+}
+
+void CameraRollUI::SetMainImage(int nav_idx) {
+    m_main_nav_idx = nav_idx;
+    m_main_image.LoadFromFile(m_nav_items[nav_idx].path);
+    if (m_main_image.IsLoaded()) {
+        auto buf = MakeMainImageTexture(m_main_image);
         vr::VROverlay()->SetOverlayRaw(
             m_img_overlays[0], buf.pixels.data(), buf.w, buf.h, 4);
     } else {
         UploadGrey(m_img_overlays[0]);
     }
-    auto& images = m_collection.Images();
-    for (int i = 1; i < N; ++i) {
-        const Image& img = images[i - 1];
-        if (img.IsLoaded()) {
-            auto thumb = MakeCroppedThumbnail(img, 8);
-            int tw = std::min(img.width, img.height) / 8;
-            vr::VROverlay()->SetOverlayRaw(m_img_overlays[i], thumb.data(), tw, tw, 4);
-        } else {
-            UploadGrey(m_img_overlays[i]);
-        }
-    }
+    UpdateMainY();
 }
 
 void CameraRollUI::UpdateMainY() {
-    const Image& img = m_collection.Main();
     float aspect;
-    if (img.IsLoaded() && img.width > 0) {
-        int bar_h    = std::max(8, (int)(img.height * BAR_FRAC));
-        int side_pad = std::max(4, (int)(img.width  * SIDE_PAD_FRAC));
-        int new_w = img.width  + 2 * side_pad;
-        int new_h = img.height + 2 * bar_h;
+    if (m_main_image.IsLoaded() && m_main_image.width > 0) {
+        int bar_h    = max(8, (int)(m_main_image.height * BAR_FRAC));
+        int side_pad = max(4, (int)(m_main_image.width  * SIDE_PAD_FRAC));
+        int new_w = m_main_image.width  + 2 * side_pad;
+        int new_h = m_main_image.height + 2 * bar_h;
         aspect = (float)new_h / (float)new_w;
     } else {
         aspect = 1.0f;
@@ -279,10 +590,23 @@ void CameraRollUI::UpdateMainY() {
 }
 
 void CameraRollUI::UpdateArrowColors() {
-    bool can_newer = !m_collection.IsAtNewest();
-    bool can_older = !m_collection.IsAtOldest();
+    bool can_newer = m_nav_offset > 0;
+    bool can_older = m_nav_offset + (N - 1) < (int)m_nav_items.size();
     m_btn_newer.UploadTexture(MakeArrowTexture(true,  can_newer), 64, 64);
     m_btn_older.UploadTexture(MakeArrowTexture(false, can_older), 64, 64);
+}
+
+void CameraRollUI::OnNewerPage() {
+    if (m_nav_offset == 0) return;
+    m_nav_offset = max(0, m_nav_offset - (N - 1));
+    UploadNavSlots();
+}
+
+void CameraRollUI::OnOlderPage() {
+    int max_offset = max(0, (int)m_nav_items.size() - (N - 1));
+    if (m_nav_offset >= max_offset) return;
+    m_nav_offset = min(m_nav_offset + (N - 1), max_offset);
+    UploadNavSlots();
 }
 
 void CameraRollUI::SetActive(bool active) {
@@ -354,29 +678,4 @@ std::vector<TriggerableButton*> CameraRollUI::Buttons() {
     result.push_back(&m_btn_older);
     for (auto& b : m_sub_btns) result.push_back(&b);
     return result;
-}
-
-// private helpers called from lambdas
-
-void CameraRollUI::ReloadAtOffset(int offset) {
-    m_collection.LoadFromFolder(m_folder, offset);
-    UploadImages();
-    UpdateMainY();
-    UpdateArrowColors();
-}
-
-void CameraRollUI::OnNewerPage() {
-    m_collection.LoadNewerPage();
-    m_observer.SetOffset(m_collection.GetOffset());
-    UploadImages();
-    UpdateMainY();
-    UpdateArrowColors();
-}
-
-void CameraRollUI::OnOlderPage() {
-    m_collection.LoadOlderPage();
-    m_observer.SetOffset(m_collection.GetOffset());
-    UploadImages();
-    UpdateMainY();
-    UpdateArrowColors();
 }

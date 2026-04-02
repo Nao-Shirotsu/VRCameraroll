@@ -1,14 +1,15 @@
 #pragma once
-#include "ImageCollection.h"
+#include "Image.h"
 #include "ImageFolderObserver.h"
 #include "TriggerableButton.h"
 #include "Mat3.h"
 #include <array>
 #include <vector>
 #include <filesystem>
+#include <string>
 
 // 左コントローラーに追従するカメラロール UI。
-// ImageCollection の保持・画像オーバーレイ・ページ送りボタンを管理する。
+// フォルダナビゲーション付き。サブスロットにはサブディレクトリ・画像を表示する。
 // rot/offset パラメータも内部で保持し、DebugUI から RotateX() 等で操作される。
 class CameraRollUI {
 public:
@@ -52,7 +53,7 @@ public:
     vr::VROverlayHandle_t MainOverlayHandle() const { return m_img_overlays[0]; }
 
     // 定数
-    static constexpr int N        = ImageCollection::N;
+    static constexpr int N        = 7;
     static constexpr float MAIN_W = 0.25f;
     static constexpr float SUB_W  = MAIN_W / (N - 1);
     static constexpr float SUB_Y  = -0.03f;
@@ -62,9 +63,25 @@ public:
 private:
     bool m_active = true;
 
-    ImageCollection      m_collection;
-    ImageFolderObserver  m_observer;
-    std::filesystem::path m_folder;
+    // ナビゲーション
+    enum class SlotType { Empty, BackDir, SubDir, Image };
+    struct NavItem {
+        SlotType type;
+        std::filesystem::path path;
+        std::wstring display_name;
+    };
+
+    std::filesystem::path m_root_dir;
+    std::filesystem::path m_current_dir;
+    std::vector<NavItem>  m_nav_items;
+    int                   m_nav_offset   = 0;
+
+    // スロット画像（サムネイル用）
+    std::array<Image, N - 1> m_slot_images;
+    Image                    m_main_image;
+    int                      m_main_nav_idx = -1;
+
+    ImageFolderObserver m_observer;
 
     // 背景オーバーレイ（サブ画像ストリップの背面）
     vr::VROverlayHandle_t m_bg_overlay;
@@ -76,7 +93,7 @@ private:
     TriggerableButton m_btn_newer;
     TriggerableButton m_btn_older;
 
-    // サブ画像ボタン（クリックでメイン選択）
+    // サブ画像ボタン（クリックでメイン選択 or フォルダナビゲーション）
     std::vector<TriggerableButton> m_sub_btns;
 
     // コントローラー相対の配置パラメータ
@@ -94,10 +111,15 @@ private:
     // ホバー状態（-1=なし、0..N-2=サブ画像インデックス）
     int m_hovered_sub_idx = -1;
 
-    void UploadImages();
+    void RefreshNavItems();
+    void UploadNavSlots();
+    void RefreshAndDisplay();
+    void NavigateInto(const std::filesystem::path& dir);
+    void ReloadCurrentDir();
+    void SetMainImage(int nav_idx);
+
     void UpdateMainY();
     void UpdateArrowColors();
-    void ReloadAtOffset(int offset);
     void OnNewerPage();
     void OnOlderPage();
 };
