@@ -93,32 +93,11 @@ int main() {
 
     bool prev_trigger        = false;
     bool prev_any_hit        = false;
-    bool prev_active         = true;   // 初期状態は active
-    bool g_ui_toggle         = false;  // トグル状態（デフォルト非表示）
-    bool prev_toggle_pressed = false;
+    bool ui_visible          = true;   // 初期状態は表示
+    bool prev_stick_pressed  = false;
 
     while (true) {
         if (GetAsyncKeyState(VK_RETURN) & 0x8000) break;
-
-        // ── IVRInput アクションステート更新 (現在無効) ──
-        // {
-        //     vr::VRActiveActionSet_t active_set = {};
-        //     active_set.ulActionSet = h_action_set;
-        //     vr::VRInput()->UpdateActionState(&active_set, sizeof(active_set), 1);
-        // }
-
-        // ── UIトグル入力（左スティック押し込み、立ち上がりエッジ検出）(現在無効) ──
-        // {
-        //     vr::InputDigitalActionData_t d = {};
-        //     vr::VRInput()->GetDigitalActionData(h_toggle_ui, &d, sizeof(d),
-        //                                         vr::k_ulInvalidInputValueHandle);
-        //     const bool pressed = d.bActive && d.bState;
-        //     if (pressed && !prev_toggle_pressed) {
-        //         g_ui_toggle = !g_ui_toggle;
-        //         printf("UIトグル: %s\n", g_ui_toggle ? "ON" : "OFF");
-        //     }
-        //     prev_toggle_pressed = pressed;
-        // }
 
         // ── フォルダ変更ポーリング ──
         camera_roll.PollFolderChanges();
@@ -132,25 +111,19 @@ int main() {
         vr::TrackedDeviceIndex_t left_hand =
             vr_system->GetTrackedDeviceIndexForControllerRole(vr::TrackedControllerRole_LeftHand);
 
-        // ── 手のひら法線（左コントローラーローカルX軸）と setactive dir の内積でアクティブ判定 ──
-        // setactive dir = HMD 正面の逆方向 = HMD トラッキング行列の第2列（ローカル+Z軸）
-        if (left_hand != vr::k_unTrackedDeviceIndexInvalid && poses[left_hand].bPoseIsValid
-            && poses[vr::k_unTrackedDeviceIndex_Hmd].bPoseIsValid)
-        {
-            const auto& lm = poses[left_hand].mDeviceToAbsoluteTracking.m;
-            const auto& hm = poses[vr::k_unTrackedDeviceIndex_Hmd].mDeviceToAbsoluteTracking.m;
-            // 左コントローラーローカルX軸（第0列 = ワールド空間での(1,0,0)方向）
-            const float nx = lm[0][0], ny = lm[1][0], nz = lm[2][0];
-            // setactive dir: HMD ローカル+Z軸（正面の逆方向、第2列）
-            const float sdx = hm[0][2], sdy = hm[1][2], sdz = hm[2][2];
-            const float dot = nx * sdx + ny * sdy + nz * sdz;
-            const bool next_active = g_ui_toggle || (dot >= 0.5f);
-            if (next_active != prev_active) {
-                camera_roll.SetActive(next_active);
-                laser.SetActive(next_active);
-                printf("カメラロール: %s\n", next_active ? "表示" : "非表示");
-                prev_active = next_active;
+        // ── 左スティック押し込みでUI表示トグル ──
+        if (left_hand != vr::k_unTrackedDeviceIndexInvalid) {
+            vr::VRControllerState_t ctrl = {};
+            vr_system->GetControllerState(left_hand, &ctrl, sizeof(ctrl));
+            const bool stick_now = (ctrl.ulButtonPressed &
+                vr::ButtonMaskFromId(vr::k_EButton_SteamVR_Trigger)) != 0;
+            if (stick_now && !prev_stick_pressed) {
+                ui_visible = !ui_visible;
+                camera_roll.SetActive(ui_visible);
+                laser.SetActive(ui_visible);
+                printf("カメラロール: %s\n", ui_visible ? "表示" : "非表示");
             }
+            prev_stick_pressed = stick_now;
         }
 
         camera_roll.UpdateTransforms(left_hand);
@@ -205,9 +178,9 @@ int main() {
 #ifdef UI_ADJUST
             printf("=== Button fired ===\n");
             laser.PrintParams();
-            printf("camera_roll rot=(%.6f, %.6f, %.6f)  offset=(%.6f, %.6f, %.6f)\n",
-                camera_roll.RotX(), camera_roll.RotY(), camera_roll.RotZ(),
-                camera_roll.OffX(), camera_roll.OffY(), camera_roll.OffZ());
+            printf("camera_roll translate=(%.6f, %.6f, %.6f)  rotate=(%.6f, %.6f, %.6f)\n",
+                camera_roll.OffX(), camera_roll.OffY(), camera_roll.OffZ(),
+                camera_roll.RotX(), camera_roll.RotY(), camera_roll.RotZ());
 #endif
         }
         prev_trigger = trigger_now;

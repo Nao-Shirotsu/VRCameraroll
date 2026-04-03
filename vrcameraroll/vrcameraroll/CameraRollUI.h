@@ -97,12 +97,12 @@ private:
     std::vector<TriggerableButton> m_sub_btns;
 
     // コントローラー相対の配置パラメータ
-    float m_rot_x    = -1.675515f;
-    float m_rot_y    =  0.209440f;
-    float m_rot_z    = -0.994838f;
-    float m_offset_x =  0.080000f;
-    float m_offset_y = -0.090000f;
-    float m_offset_z =  0.050000f;
+    float m_rot_x    = -0.942478f;
+    float m_rot_y    = -0.157079f;
+    float m_rot_z    =  0.104719f;
+    float m_offset_x =  0.220000f;
+    float m_offset_y = -0.080000f;
+    float m_offset_z = -0.170000f;
 
     // レイアウト
     struct Layout { float x, y; };
