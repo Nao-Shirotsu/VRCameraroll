@@ -5,7 +5,7 @@
 #include <cstdio>
 
 static constexpr float BAR_FRAC      = 0.04f; // iPad風グレー帯の高さ比率（画像高さに対する割合）
-static constexpr float SIDE_PAD_FRAC = 0.03f; // 左右グレー帯の幅比率（画像幅に対する割合）
+static constexpr float SIDE_PAD_FRAC = CameraRollUI::SIDE_PAD_FRAC;
 
 // ────────────────────────────────────────────
 // ナビゲーション用ヘルパー
@@ -80,8 +80,8 @@ static std::vector<uint8_t> MakeArrowTexture(bool left_arrow, bool active = true
     std::vector<uint8_t> pixels(S * S * 4);
     uint8_t bg_r, bg_g, bg_b, bg_a, arr_r, arr_g, arr_b;
     if (active) {
-        bg_r=40;  bg_g=110; bg_b=70;  bg_a=220;
-        arr_r=110; arr_g=235; arr_b=150;
+        bg_r=71;  bg_g=153; bg_b=178;  bg_a=220;
+        arr_r=110; arr_g=234; arr_b=189;
     } else {
         bg_r=65;  bg_g=65;  bg_b=68;  bg_a=160;
         arr_r=105; arr_g=105; arr_b=108;
@@ -128,7 +128,7 @@ static PixelBuffer MakeMainImageTexture(const Image& img) {
     std::vector<uint8_t> out(w * h * 4, 0);
 
     // キャンバス全体をグレーで塗る（上下帯 + 左右帯を一括）
-    constexpr uint8_t BR = 55, BG = 55, BB = 58;
+    constexpr uint8_t BR = 128, BG = 128, BB = 128;
     for (int i = 0; i < w * h; ++i) {
         out[i*4+0]=BR; out[i*4+1]=BG; out[i*4+2]=BB; out[i*4+3]=255;
     }
@@ -148,13 +148,13 @@ static PixelBuffer MakeMainImageTexture(const Image& img) {
 }
 
 // サブ画像ストリップの背景テクスチャ（ダーク角丸矩形）
-static std::vector<uint8_t> MakeStripBgTexture(int w, int h) {
+static std::vector<uint8_t> MakeStripBgTexture(int w, int h, int radius) {
     std::vector<uint8_t> pixels(w * h * 4);
     for (int i = 0; i < w * h; ++i) {
         pixels[i*4+0]=30; pixels[i*4+1]=30;
         pixels[i*4+2]=35; pixels[i*4+3]=190;
     }
-    ApplyRoundedCorners(pixels, w, h, h / 3);
+    ApplyRoundedCorners(pixels, w, h, radius);
     return pixels;
 }
 
@@ -217,6 +217,19 @@ static std::vector<uint8_t> MakeFolderTexture(const std::wstring& name, bool is_
         RECT hl_rc = { 3, 15, 61, 20 };
         FillRect(hdc, &hl_rc, hbr_hl);
         DeleteObject(hbr_hl);
+        // 中央に上向き三角矢印
+        {
+            HBRUSH hbr_arr = CreateSolidBrush(RGB(210, 230, 255));
+            HPEN   hpen    = CreatePen(PS_NULL, 0, 0);
+            HGDIOBJ hbr_old  = SelectObject(hdc, hbr_arr);
+            HGDIOBJ hpen_old = SelectObject(hdc, hpen);
+            POINT tri[] = { {32, 18}, {20, 36}, {44, 36} };
+            Polygon(hdc, tri, 3);
+            SelectObject(hdc, hpen_old);
+            SelectObject(hdc, hbr_old);
+            DeleteObject(hpen);
+            DeleteObject(hbr_arr);
+        }
     }
 
     // テキスト描画
@@ -238,7 +251,7 @@ static std::vector<uint8_t> MakeFolderTexture(const std::wstring& name, bool is_
 
     std::wstring label;
     if (is_back) {
-        label = L"\u2191"; // ↑
+        label = L"親フォルダへ";
     } else {
         label = name;
         if (label.size() > 7) {
@@ -291,11 +304,12 @@ CameraRollUI::CameraRollUI()
     vr::VROverlay()->ShowOverlay(m_bg_overlay);
     vr::VROverlay()->SetOverlayInputMethod(m_bg_overlay, vr::VROverlayInputMethod_None);
     vr::VROverlay()->SetOverlaySortOrder(m_bg_overlay, 0);
-    constexpr float BG_W = MAIN_W + 2.0f * (BTN_GAP + BTN_W);
-    vr::VROverlay()->SetOverlayWidthInMeters(m_bg_overlay, BG_W);
+    vr::VROverlay()->SetOverlayWidthInMeters(m_bg_overlay, MAIN_W);
     {
-        constexpr int BG_TW = 512, BG_TH = 72;
-        auto bg_tex = MakeStripBgTexture(BG_TW, BG_TH);
+        constexpr int BG_TW = 512;
+        const int BG_TH = max(2, (int)(BG_TW * (SUB_W + SUB_GAP) / MAIN_W));
+        const int bg_radius = max(1, (int)(BG_TW * SIDE_PAD_FRAC / (1.0f + 2.0f * SIDE_PAD_FRAC)));
+        auto bg_tex = MakeStripBgTexture(BG_TW, BG_TH, bg_radius);
         vr::VROverlay()->SetOverlayRaw(m_bg_overlay, bg_tex.data(), BG_TW, BG_TH, 4);
     }
 
@@ -314,10 +328,11 @@ CameraRollUI::CameraRollUI()
         vr::VROverlay()->SetOverlayInputMethod(m_img_overlays[i], vr::VROverlayInputMethod_None);
 
     // レイアウト計算
-    const float SUB_X0 = -MAIN_W / 2.0f + SUB_W / 2.0f;
+    const float stride  = SUB_W + SUB_GAP;
+    const float SUB_X0  = -SUB_CONTENT_W / 2.0f + SUB_W / 2.0f;
     m_img_layout[0] = { 0.0f, 0.0f };
     for (int i = 1; i < N; ++i)
-        m_img_layout[i] = { SUB_X0 + (i - 1) * SUB_W, SUB_Y };
+        m_img_layout[i] = { SUB_X0 + (i - 1) * stride, SUB_Y };
 
     for (int i = 0; i < N; ++i) {
         vr::VROverlay()->SetOverlayWidthInMeters(m_img_overlays[i],
@@ -647,8 +662,8 @@ void CameraRollUI::UpdateTransforms(vr::TrackedDeviceIndex_t left_hand) {
     }
 
     // ページ送りボタン（sort order 2 で常に前面）
-    const float BTN_L_X = -(MAIN_W / 2.0f + BTN_GAP + BTN_W / 2.0f);
-    const float BTN_R_X =  (MAIN_W / 2.0f + BTN_GAP + BTN_W / 2.0f);
+    const float BTN_L_X = -(SUB_CONTENT_W / 2.0f + BTN_GAP + BTN_W / 2.0f);
+    const float BTN_R_X =  (SUB_CONTENT_W / 2.0f + BTN_GAP + BTN_W / 2.0f);
     m_btn_newer.SetTransformTrackedDeviceRelative(left_hand, make(BTN_L_X, SUB_Y));
     m_btn_older.SetTransformTrackedDeviceRelative(left_hand, make(BTN_R_X, SUB_Y));
     // サブ画像ボタンは m_img_overlays[i] と同じハンドルなので位置は上のループで設定済み

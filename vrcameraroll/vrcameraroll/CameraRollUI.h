@@ -53,12 +53,21 @@ public:
     vr::VROverlayHandle_t MainOverlayHandle() const { return m_img_overlays[0]; }
 
     // 定数
-    static constexpr int N        = 7;
-    static constexpr float MAIN_W = 0.25f;
-    static constexpr float SUB_W  = MAIN_W / (N - 1);
-    static constexpr float SUB_Y  = -0.03f;
-    static constexpr float BTN_GAP = 0.01f;
-    static constexpr float BTN_W   = 0.05f;
+    static constexpr int   N             = 7;
+    static constexpr float SIDE_PAD_FRAC = 0.03f;
+    static constexpr float BTN_GAP       = 0.01f;
+    static constexpr float BTN_W         = 0.05f * 2.0f / 3.0f;                       // ページ送りボタン幅
+    static constexpr float SUB_CONTENT_W = 0.25f;                                     // サブ画像6枚の合計幅
+    // サムネイル間ギャップ比率（SUB_W に対する割合）。SUB_W と SUB_GAP の両方に使う
+    static constexpr float SUB_GAP_RATIO = 0.1f;
+    // (N-1)枚 + (N-2)ギャップ = SUB_CONTENT_W になるよう SUB_W を逆算
+    static constexpr float SUB_W         = SUB_CONTENT_W / ((N - 1) + SUB_GAP_RATIO * (N - 2));
+    static constexpr float SUB_GAP       = SUB_GAP_RATIO * SUB_W;
+    static constexpr float SUB_Y         = -0.03f;
+    static constexpr float STRIP_W       = SUB_CONTENT_W + 2.0f * (BTN_GAP + BTN_W); // 背景＋ボタン込み全幅
+    // メイン画像オーバーレイ幅: コンテンツ幅 = STRIP_W になるよう算出
+    static constexpr float MAIN_W        = STRIP_W * (1.0f + 2.0f * SIDE_PAD_FRAC);
+    static constexpr float CONTENT_W     = MAIN_W / (1.0f + 2.0f * SIDE_PAD_FRAC);   // = STRIP_W
 
 private:
     bool m_active = true;
