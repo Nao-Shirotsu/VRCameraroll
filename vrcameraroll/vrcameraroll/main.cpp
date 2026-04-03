@@ -78,23 +78,12 @@ int main() {
     DebugUI debug_ui(camera_roll, laser);
 #endif
 
-    // ── IVRInput 初期化 (現在無効: SetActionManifestPath がレガシー GetControllerState を妨害するため) ──
-    // {
-    //     char exe_path_buf[MAX_PATH];
-    //     GetModuleFileNameA(nullptr, exe_path_buf, MAX_PATH);
-    //     std::filesystem::path manifest =
-    //         std::filesystem::path(exe_path_buf).parent_path() / "actions" / "actions.json";
-    //     vr::VRInput()->SetActionManifestPath(manifest.string().c_str());
-    // }
-    // vr::VRActionHandle_t    h_toggle_ui  = vr::k_ulInvalidActionHandle;
-    // vr::VRActionSetHandle_t h_action_set = vr::k_ulInvalidActionSetHandle;
-    // vr::VRInput()->GetActionHandle("/actions/camera_roll/in/toggle_ui", &h_toggle_ui);
-    // vr::VRInput()->GetActionSetHandle("/actions/camera_roll", &h_action_set);
 
-    bool prev_trigger        = false;
-    bool prev_any_hit        = false;
-    bool ui_visible          = true;   // 初期状態は表示
-    bool prev_stick_pressed  = false;
+    bool     prev_trigger          = false;
+    bool     prev_any_hit          = false;
+    bool     ui_visible            = true;   // 初期状態は表示
+    bool     prev_stick_pressed    = false;
+    ULONGLONG left_trigger_click_ms = 0;     // 直前クリックの時刻（0=未クリック）
 
     while (true) {
         if (GetAsyncKeyState(VK_RETURN) & 0x8000) break;
@@ -111,17 +100,23 @@ int main() {
         vr::TrackedDeviceIndex_t left_hand =
             vr_system->GetTrackedDeviceIndexForControllerRole(vr::TrackedControllerRole_LeftHand);
 
-        // ── 左スティック押し込みでUI表示トグル ──
+        // ── 左トリガーダブルクリックでUI表示トグル（0.375秒以内）──
         if (left_hand != vr::k_unTrackedDeviceIndexInvalid) {
             vr::VRControllerState_t ctrl = {};
             vr_system->GetControllerState(left_hand, &ctrl, sizeof(ctrl));
             const bool stick_now = (ctrl.ulButtonPressed &
                 vr::ButtonMaskFromId(vr::k_EButton_SteamVR_Trigger)) != 0;
             if (stick_now && !prev_stick_pressed) {
-                ui_visible = !ui_visible;
-                camera_roll.SetActive(ui_visible);
-                laser.SetActive(ui_visible);
-                printf("カメラロール: %s\n", ui_visible ? "表示" : "非表示");
+                const ULONGLONG now = GetTickCount64();
+                if (left_trigger_click_ms != 0 && (now - left_trigger_click_ms) <= 375) {
+                    ui_visible = !ui_visible;
+                    camera_roll.SetActive(ui_visible);
+                    laser.SetActive(ui_visible);
+                    printf("カメラロール: %s\n", ui_visible ? "表示" : "非表示");
+                    left_trigger_click_ms = 0;
+                } else {
+                    left_trigger_click_ms = now;
+                }
             }
             prev_stick_pressed = stick_now;
         }
