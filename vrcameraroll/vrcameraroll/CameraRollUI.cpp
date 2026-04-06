@@ -377,6 +377,8 @@ void CameraRollUI::LoadImages(const std::filesystem::path& folder) {
     m_current_dir  = m_root_dir;
     m_nav_offset   = 0;
     m_main_image.Unload();
+    m_main_image_w = 0;
+    m_main_image_h = 0;
     m_main_nav_idx = -1;
     RefreshAndDisplay();
 }
@@ -485,6 +487,7 @@ void CameraRollUI::UploadNavSlots() {
                 int tw = min(m_slot_images[slot].width,
                                   m_slot_images[slot].height) / 8;
                 vr::VROverlay()->SetOverlayRaw(overlay, thumb.data(), tw, tw, 4);
+                m_slot_images[slot].Unload(); // テクスチャ転送後にピクセルを解放
             } else {
                 UploadGrey(overlay);
             }
@@ -522,6 +525,8 @@ void CameraRollUI::NavigateInto(const std::filesystem::path& dir) {
     catch (...) { m_current_dir = dir; }
     m_nav_offset   = 0;
     m_main_image.Unload();
+    m_main_image_w = 0;
+    m_main_image_h = 0;
     m_main_nav_idx = -1;
     RefreshAndDisplay();
 }
@@ -569,6 +574,8 @@ void CameraRollUI::ReloadCurrentDir() {
     } else {
         // 画像が一枚もない
         m_main_image.Unload();
+        m_main_image_w = 0;
+        m_main_image_h = 0;
         m_main_nav_idx = -1;
         UploadGrey(m_img_overlays[0]);
         UpdateMainY();
@@ -579,10 +586,15 @@ void CameraRollUI::SetMainImage(int nav_idx) {
     m_main_nav_idx = nav_idx;
     m_main_image.LoadFromFile(m_nav_items[nav_idx].path);
     if (m_main_image.IsLoaded()) {
+        m_main_image_w = m_main_image.width;
+        m_main_image_h = m_main_image.height;
         auto buf = MakeMainImageTexture(m_main_image);
         vr::VROverlay()->SetOverlayRaw(
             m_img_overlays[0], buf.pixels.data(), buf.w, buf.h, 4);
+        m_main_image.Unload(); // テクスチャ転送後にピクセルを解放
     } else {
+        m_main_image_w = 0;
+        m_main_image_h = 0;
         UploadGrey(m_img_overlays[0]);
     }
     UpdateMainY();
@@ -590,11 +602,11 @@ void CameraRollUI::SetMainImage(int nav_idx) {
 
 void CameraRollUI::UpdateMainY() {
     float aspect;
-    if (m_main_image.IsLoaded() && m_main_image.width > 0) {
-        int bar_h    = max(8, (int)(m_main_image.height * BAR_FRAC));
-        int side_pad = max(4, (int)(m_main_image.width  * SIDE_PAD_FRAC));
-        int new_w = m_main_image.width  + 2 * side_pad;
-        int new_h = m_main_image.height + 2 * bar_h;
+    if (m_main_image_w > 0 && m_main_image_h > 0) {
+        int bar_h    = max(8, (int)(m_main_image_h * BAR_FRAC));
+        int side_pad = max(4, (int)(m_main_image_w * SIDE_PAD_FRAC));
+        int new_w = m_main_image_w + 2 * side_pad;
+        int new_h = m_main_image_h + 2 * bar_h;
         aspect = (float)new_h / (float)new_w;
     } else {
         aspect = 1.0f;

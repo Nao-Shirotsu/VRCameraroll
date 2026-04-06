@@ -120,6 +120,10 @@ private:
     // ホバー状態（-1=なし、0..N-2=サブ画像インデックス）
     int m_hovered_sub_idx = -1;
 
+    // メイン画像のサイズ（ピクセル解放後も UpdateMainY で参照するために保持）
+    int m_main_image_w = 0;
+    int m_main_image_h = 0;
+
     void RefreshNavItems();
     void UploadNavSlots();
     void RefreshAndDisplay();

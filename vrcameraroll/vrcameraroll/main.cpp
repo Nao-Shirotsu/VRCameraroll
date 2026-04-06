@@ -12,6 +12,46 @@
 #include "DebugUI.h"
 #endif
 
+// タスクバーに表示される最小化ウィンドウを作成する。
+// ウィンドウを閉じると WM_QUIT が投げられる。
+static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
+    if (msg == WM_DESTROY) { PostQuitMessage(0); return 0; }
+    return DefWindowProcW(hwnd, msg, wp, lp);
+}
+
+static void CreateTaskbarWindow() {
+    WNDCLASSEXW wc   = {};
+    wc.cbSize        = sizeof(wc);
+    wc.lpfnWndProc   = WndProc;
+    wc.hInstance     = GetModuleHandleW(nullptr);
+    wc.hIcon         = LoadIconW(GetModuleHandleW(nullptr), MAKEINTRESOURCEW(1));
+    wc.lpszClassName = L"VRCameraRoll";
+    RegisterClassExW(&wc);
+
+    HWND hwnd = CreateWindowExW(
+        WS_EX_APPWINDOW,
+        L"VRCameraRoll", L"ぶいちゃフォトビュー",
+        WS_OVERLAPPEDWINDOW,
+        CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT,
+        nullptr, nullptr, wc.hInstance, nullptr);
+    ShowWindow(hwnd, SW_SHOWMINNOACTIVE);
+}
+
+// エラー表示が必要になった時点で初めてコンソールウィンドウを開く。
+// 既にコンソールがある場合（UI_ADJUST ビルド等）は何もしない。
+static void EnsureConsole() {
+    static bool done = false;
+    if (!done) {
+        done = true;
+        if (!GetConsoleWindow()) {
+            AllocConsole();
+            FILE* f;
+            freopen_s(&f, "CONOUT$", "w", stdout);
+        }
+        SetConsoleOutputCP(CP_UTF8);
+    }
+}
+
 // 実行ファイルと同じフォルダの config.yml から image_folder の値を読む。
 // 該当キーが見つからない場合は空文字を返す。
 static std::string LoadImageFolderFromConfig() {
@@ -22,6 +62,7 @@ static std::string LoadImageFolderFromConfig() {
 
     std::ifstream file(config_path);
     if (!file.is_open()) {
+        EnsureConsole();
         printf("config.yml が見つかりません: %s\n", config_path.string().c_str());
         return {};
     }
@@ -46,6 +87,7 @@ static std::string LoadImageFolderFromConfig() {
         }
     }
 
+    EnsureConsole();
     printf("config.yml に image_folder が見つかりません\n");
     return {};
 }
@@ -69,15 +111,23 @@ static bool WaitForSteamVR(DWORD timeout_ms = INFINITE) {
 }
 
 int main() {
+#ifndef UI_ADJUST
+    FreeConsole();  // 通常実行時はコンソールを非表示（エラー時のみ EnsureConsole で開く）
+#else
     SetConsoleOutputCP(CP_UTF8);
+#endif
+    CreateTaskbarWindow();
 
     const std::string image_folder = LoadImageFolderFromConfig();
     if (image_folder.empty()) {
+        EnsureConsole();
         printf("image_folder の設定が見つかりませんでした。config.yml を確認してください。\n");
         return 1;
     }
+#ifdef UI_ADJUST
     printf("画像フォルダ: %s\n", image_folder.c_str());
-    printf("起動しました。終了するには Enter キーを押すか、このウィンドウを閉じてください。\n");
+    printf("起動しました。タスクバーのウィンドウを閉じると終了します。\n");
+#endif
 
     // ── 外側ループ: SteamVR が切れても再接続して常駐し続ける ──
     while (true) {
@@ -85,13 +135,13 @@ int main() {
         vr::EVRInitError err = vr::VRInitError_None;
         vr::IVRSystem* vr_system = vr::VR_Init(&err, vr::VRApplication_Overlay);
         if (err != vr::VRInitError_None) {
+            EnsureConsole();
             printf("SteamVR 接続失敗 (%d)。再試行します…\n", (int)err);
             Sleep(3000);
             continue;
         }
 
-        bool user_quit    = false;  // Enter キー等でユーザーが明示的に終了
-        bool vr_lost      = false;  // SteamVR 側の終了 → 再接続へ
+        bool user_quit = false;  // WM_QUIT（タスクバーウィンドウを閉じた）→ プロセス終了
 
         {   // ── OpenVR オブジェクトのスコープ: VR_Shutdown() より前にデストラクタを呼ぶ ──
         // LaserController を先に作る:
@@ -114,8 +164,6 @@ int main() {
 
         // ── 内側ループ: メインフレームループ ──
         while (true) {
-            if (GetAsyncKeyState(VK_RETURN) & 0x8000) { printf("[DEBUG] Enter キー検出 → 終了\n"); user_quit = true; break; }
-
             // ── フォルダ変更ポーリング ──
             camera_roll.PollFolderChanges();
 
@@ -140,7 +188,9 @@ int main() {
                         ui_visible = !ui_visible;
                         camera_roll.SetActive(ui_visible);
                         laser.SetActive(ui_visible);
+#ifdef UI_ADJUST
                         printf("カメラロール: %s\n", ui_visible ? "表示" : "非表示");
+#endif
                         left_trigger_click_ms = 0;
                     } else {
                         left_trigger_click_ms = now;
@@ -215,12 +265,22 @@ int main() {
                 if (event.eventType == vr::VREvent_Quit) {
                     // SteamVR がシャットダウンを要求（AFK・省電力・手動終了など）。
                     // プロセスは終了せず、SteamVR の再起動を待って再接続する。
+#ifdef UI_ADJUST
                     printf("[DEBUG] VREvent_Quit 受信 → 再接続待機へ\n");
+#endif
                     vr::VRSystem()->AcknowledgeQuit_Exiting();
-                    vr_lost = true;
                     break;
                 }
             }
+
+            // ── ウィンドウメッセージポンプ（タスクバーウィンドウの閉じる操作を処理）──
+            MSG wmsg;
+            while (PeekMessageW(&wmsg, nullptr, 0, 0, PM_REMOVE)) {
+                if (wmsg.message == WM_QUIT) { user_quit = true; }
+                TranslateMessage(&wmsg);
+                DispatchMessageW(&wmsg);
+            }
+            if (user_quit) break;
 
             Sleep(16);
         }
@@ -229,19 +289,28 @@ int main() {
         // VR 接続を切断（オブジェクトのデストラクタより後に呼ぶ）
         vr::VR_Shutdown();
 
-        if (user_quit) { printf("[DEBUG] user_quit=true → プロセス終了\n"); break; }  // 明示的な終了 → プロセス終了
+        if (user_quit) break;  // タスクバーウィンドウを閉じた → プロセス終了
 
         // SteamVR が切れた → 再接続待ち
-        printf("SteamVR が終了しました。再起動を待機中…（Enter で中止）\n");
+#ifdef UI_ADJUST
+        printf("SteamVR が終了しました。再起動を待機中…\n");
+#endif
         while (true) {
-            // Enter が押されたら待機自体をキャンセルして終了
-            if (GetAsyncKeyState(VK_RETURN) & 0x8000) { printf("[DEBUG] 再接続待機中に Enter 検出 → 終了\n"); user_quit = true; break; }
+            MSG wmsg;
+            while (PeekMessageW(&wmsg, nullptr, 0, 0, PM_REMOVE)) {
+                if (wmsg.message == WM_QUIT) { user_quit = true; }
+                TranslateMessage(&wmsg);
+                DispatchMessageW(&wmsg);
+            }
+            if (user_quit) break;
 
             vr::EVRInitError test_err = vr::VRInitError_None;
             vr::IVRSystem* test_sys = vr::VR_Init(&test_err, vr::VRApplication_Overlay);
             if (test_err == vr::VRInitError_None) {
                 vr::VR_Shutdown();
+#ifdef UI_ADJUST
                 printf("SteamVR が再起動しました。再接続します…\n");
+#endif
                 break;
             }
             Sleep(3000);
