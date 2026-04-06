@@ -90,6 +90,10 @@ int main() {
             continue;
         }
 
+        bool user_quit    = false;  // Enter キー等でユーザーが明示的に終了
+        bool vr_lost      = false;  // SteamVR 側の終了 → 再接続へ
+
+        {   // ── OpenVR オブジェクトのスコープ: VR_Shutdown() より前にデストラクタを呼ぶ ──
         // LaserController を先に作る:
         // コンストラクタ内で globalInputOverlaysEnabled=false を設定するため、
         // CameraRollUI の overlay 作成より前に呼ぶ必要がある。
@@ -108,12 +112,9 @@ int main() {
         bool     prev_stick_pressed    = false;
         ULONGLONG left_trigger_click_ms = 0;     // 直前クリックの時刻（0=未クリック）
 
-        bool user_quit    = false;  // Enter キー等でユーザーが明示的に終了
-        bool vr_lost      = false;  // SteamVR 側の終了 → 再接続へ
-
         // ── 内側ループ: メインフレームループ ──
         while (true) {
-            if (GetAsyncKeyState(VK_RETURN) & 0x8000) { user_quit = true; break; }
+            if (GetAsyncKeyState(VK_RETURN) & 0x8000) { printf("[DEBUG] Enter キー検出 → 終了\n"); user_quit = true; break; }
 
             // ── フォルダ変更ポーリング ──
             camera_roll.PollFolderChanges();
@@ -214,6 +215,7 @@ int main() {
                 if (event.eventType == vr::VREvent_Quit) {
                     // SteamVR がシャットダウンを要求（AFK・省電力・手動終了など）。
                     // プロセスは終了せず、SteamVR の再起動を待って再接続する。
+                    printf("[DEBUG] VREvent_Quit 受信 → 再接続待機へ\n");
                     vr::VRSystem()->AcknowledgeQuit_Exiting();
                     vr_lost = true;
                     break;
@@ -222,17 +224,18 @@ int main() {
 
             Sleep(16);
         }
+        }   // ── OpenVR オブジェクトのスコープ終了: laser / camera_roll のデストラクタがここで呼ばれる ──
 
-        // VR 接続を切断（オブジェクトのデストラクタより前に呼ぶ）
+        // VR 接続を切断（オブジェクトのデストラクタより後に呼ぶ）
         vr::VR_Shutdown();
 
-        if (user_quit) break;  // 明示的な終了 → プロセス終了
+        if (user_quit) { printf("[DEBUG] user_quit=true → プロセス終了\n"); break; }  // 明示的な終了 → プロセス終了
 
         // SteamVR が切れた → 再接続待ち
         printf("SteamVR が終了しました。再起動を待機中…（Enter で中止）\n");
         while (true) {
             // Enter が押されたら待機自体をキャンセルして終了
-            if (GetAsyncKeyState(VK_RETURN) & 0x8000) { user_quit = true; break; }
+            if (GetAsyncKeyState(VK_RETURN) & 0x8000) { printf("[DEBUG] 再接続待機中に Enter 検出 → 終了\n"); user_quit = true; break; }
 
             vr::EVRInitError test_err = vr::VRInitError_None;
             vr::IVRSystem* test_sys = vr::VR_Init(&test_err, vr::VRApplication_Overlay);
