@@ -159,8 +159,8 @@ int main() {
         bool     prev_trigger          = false;
         bool     prev_any_hit          = false;
         bool     ui_visible            = true;   // 初期状態は表示
-        bool     prev_stick_pressed    = false;
-        ULONGLONG left_trigger_click_ms = 0;     // 直前クリックの時刻（0=未クリック）
+        bool     prev_grip_pressed     = false;
+        ULONGLONG left_grip_click_ms   = 0;      // 直前クリックの時刻（0=未クリック）
 
         // ── 内側ループ: メインフレームループ ──
         while (true) {
@@ -176,27 +176,27 @@ int main() {
             vr::TrackedDeviceIndex_t left_hand =
                 vr_system->GetTrackedDeviceIndexForControllerRole(vr::TrackedControllerRole_LeftHand);
 
-            // ── 左トリガーダブルクリックでUI表示トグル（0.375秒以内）──
+            // ── 左グリップダブルタップでUI表示トグル（0.375秒以内）──
             if (left_hand != vr::k_unTrackedDeviceIndexInvalid) {
                 vr::VRControllerState_t ctrl = {};
                 vr_system->GetControllerState(left_hand, &ctrl, sizeof(ctrl));
-                const bool stick_now = (ctrl.ulButtonPressed &
-                    vr::ButtonMaskFromId(vr::k_EButton_SteamVR_Trigger)) != 0;
-                if (stick_now && !prev_stick_pressed) {
+                const bool grip_now = (ctrl.ulButtonPressed &
+                    vr::ButtonMaskFromId(vr::k_EButton_Grip)) != 0;
+                if (grip_now && !prev_grip_pressed) {
                     const ULONGLONG now = GetTickCount64();
-                    if (left_trigger_click_ms != 0 && (now - left_trigger_click_ms) <= 375) {
+                    if (left_grip_click_ms != 0 && (now - left_grip_click_ms) <= 375) {
                         ui_visible = !ui_visible;
                         camera_roll.SetActive(ui_visible);
                         laser.SetActive(ui_visible);
 #ifdef UI_ADJUST
                         printf("カメラロール: %s\n", ui_visible ? "表示" : "非表示");
 #endif
-                        left_trigger_click_ms = 0;
+                        left_grip_click_ms = 0;
                     } else {
-                        left_trigger_click_ms = now;
+                        left_grip_click_ms = now;
                     }
                 }
-                prev_stick_pressed = stick_now;
+                prev_grip_pressed = grip_now;
             }
 
             camera_roll.UpdateTransforms(left_hand);
