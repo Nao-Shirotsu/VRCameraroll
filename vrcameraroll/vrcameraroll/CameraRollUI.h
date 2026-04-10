@@ -1,4 +1,5 @@
 #pragma once
+#include <Windows.h>
 #include "Image.h"
 #include "ImageFolderObserver.h"
 #include "TriggerableButton.h"
@@ -123,6 +124,9 @@ private:
     // メイン画像のサイズ（ピクセル解放後も UpdateMainY で参照するために保持）
     int m_main_image_w = 0;
     int m_main_image_h = 0;
+
+    // 最後に重い読み込み処理を行った時刻（ms）。PollFolderChanges のデバウンス用。
+    ULONGLONG m_last_load_ms = 0;
 
     void RefreshNavItems();
     void UploadNavSlots();
