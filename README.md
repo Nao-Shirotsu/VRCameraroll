@@ -2,6 +2,10 @@
 
 HMD をかぶったままPC内の画像を閲覧できる SteamVR オーバーレイアプリケーションです。 
 
+※「ぶいちゃ」と名乗ってはいますが、画像フォルダをよみこんで表示するアプリケーションですので、読み込み対象フォルダをconfigで変えれば他の用途にも使えます。
+
+[!['ぶいちゃフォトビュー紹介動画']('https://pbs.twimg.com/media/HFiCz3Fa4AAAKGy?format=jpg')]('https://youtube.com/shorts/V83oOGgfafQ')
+
 ## ライセンスについて
 
 **本リポジトリを利用する前に [LICENSE.md](LICENSE.md) を必ずお読みください。**
