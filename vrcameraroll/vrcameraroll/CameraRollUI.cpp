@@ -1,8 +1,12 @@
 #include <Windows.h>
+#include <Shobjidl.h>
+#pragma comment(lib, "Shell32.lib")
+#pragma comment(lib, "Ole32.lib")
 #include "CameraRollUI.h"
 #include <algorithm>
 #include <cstring>
 #include <cstdio>
+#include <cmath>
 
 static constexpr float BAR_FRAC      = 0.04f; // iPad風グレー帯の高さ比率（画像高さに対する割合）
 static constexpr float SIDE_PAD_FRAC = CameraRollUI::SIDE_PAD_FRAC;
@@ -41,6 +45,120 @@ static void ApplyRoundedCorners(std::vector<uint8_t>& pixels, int w, int h, int 
             }
         }
     }
+}
+
+// PixelBuffer: ピクセルデータと幅・高さをまとめた型（UploadNavSlots・SetMainImage で共用）
+struct PixelBuffer { std::vector<uint8_t> pixels; int w = 0, h = 0; };
+
+// 画像をインプレースで指定した最大辺にダウンスケールする（ボックスフィルター）。
+// すでに小さければ何もしない。
+static void DownscaleInPlace(Image& img, int max_dim) {
+    if (img.width <= max_dim && img.height <= max_dim) return;
+    float scale = (float)max_dim / (float)max(img.width, img.height);
+    int new_w = max(1, (int)(img.width  * scale));
+    int new_h = max(1, (int)(img.height * scale));
+    float sx = (float)img.width  / new_w;
+    float sy = (float)img.height / new_h;
+    std::vector<uint8_t> out(new_w * new_h * 4, 0);
+    for (int y = 0; y < new_h; ++y) {
+        for (int x = 0; x < new_w; ++x) {
+            int x0 = (int)(x * sx), y0 = (int)(y * sy);
+            int x1 = min((int)((x + 1) * sx), img.width  - 1);
+            int y1 = min((int)((y + 1) * sy), img.height - 1);
+            uint32_t r = 0, g = 0, b = 0, a = 0, count = 0;
+            for (int py = y0; py <= y1; ++py) {
+                for (int px = x0; px <= x1; ++px) {
+                    int idx = (py * img.width + px) * 4;
+                    r += img.pixels[idx+0]; g += img.pixels[idx+1];
+                    b += img.pixels[idx+2]; a += img.pixels[idx+3];
+                    ++count;
+                }
+            }
+            if (count > 0) {
+                int dst = (y * new_w + x) * 4;
+                out[dst+0]=(uint8_t)(r/count); out[dst+1]=(uint8_t)(g/count);
+                out[dst+2]=(uint8_t)(b/count); out[dst+3]=(uint8_t)(a/count);
+            }
+        }
+    }
+    img.pixels = std::move(out);
+    img.width  = new_w;
+    img.height = new_h;
+}
+
+// Windows のサムネイルキャッシュから正方形 RGBA ピクセルを取得する。
+// Explorer がキャッシュ済みの場合は数ミリ秒で完了（高速）。
+// キャッシュがない（新規ファイルなど）場合は pixels が空の PixelBuffer を返す。
+static PixelBuffer GetWinThumbnail(const std::filesystem::path& path, int size) {
+    // COM の初期化（メインスレッド上で一度だけ）
+    static bool s_com_inited = false;
+    if (!s_com_inited) {
+        HRESULT h = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+        s_com_inited = (SUCCEEDED(h) || h == RPC_E_CHANGED_MODE);
+    }
+
+    IShellItem* psi = nullptr;
+    if (FAILED(SHCreateItemFromParsingName(path.wstring().c_str(), nullptr,
+            IID_PPV_ARGS(&psi)))) return {};
+
+    IShellItemImageFactory* pf = nullptr;
+    HRESULT hr = psi->QueryInterface(IID_PPV_ARGS(&pf));
+    psi->Release();
+    if (FAILED(hr) || !pf) return {};
+
+    // SIIGBF_THUMBNAILONLY : キャッシュがなければ失敗させる（遅い生成はしない）
+    // SIIGBF_CROPTOSQUARE  : 正方形にクロップして返す（サブオーバーレイのレイアウトに合わせる）
+    // SIIGBF_BIGGERSIZEOK  : キャッシュにより大きいものがあればそれを使う
+    HBITMAP hbm_src = nullptr;
+    SIZE sz = { size, size };
+    hr = pf->GetImage(sz,
+        SIIGBF_THUMBNAILONLY | SIIGBF_CROPTOSQUARE | SIIGBF_BIGGERSIZEOK, &hbm_src);
+    pf->Release();
+    if (FAILED(hr) || !hbm_src) return {};
+
+    // 実際に返ってきたビットマップサイズを取得
+    BITMAP bm_info = {};
+    GetObject(hbm_src, sizeof(bm_info), &bm_info);
+    int bw = abs(bm_info.bmWidth);
+    int bh = abs(bm_info.bmHeight);
+    if (bw <= 0 || bh <= 0) { DeleteObject(hbm_src); return {}; }
+
+    // DIBSection に BitBlt して BGRA ピクセルを取り出す
+    BITMAPINFO bmi = {};
+    bmi.bmiHeader.biSize        = sizeof(BITMAPINFOHEADER);
+    bmi.bmiHeader.biWidth       = bw;
+    bmi.bmiHeader.biHeight      = -bh;   // top-down
+    bmi.bmiHeader.biPlanes      = 1;
+    bmi.bmiHeader.biBitCount    = 32;
+    bmi.bmiHeader.biCompression = BI_RGB;
+
+    void* bits = nullptr;
+    HDC hdc_dst = CreateCompatibleDC(nullptr);
+    HBITMAP hbm_dib = CreateDIBSection(hdc_dst, &bmi, DIB_RGB_COLORS, &bits, nullptr, 0);
+    HGDIOBJ old_dst = SelectObject(hdc_dst, hbm_dib);
+    HDC hdc_src = CreateCompatibleDC(nullptr);
+    HGDIOBJ old_src = SelectObject(hdc_src, hbm_src);
+    BitBlt(hdc_dst, 0, 0, bw, bh, hdc_src, 0, 0, SRCCOPY);
+    SelectObject(hdc_src, old_src); DeleteDC(hdc_src);
+    SelectObject(hdc_dst, old_dst); DeleteDC(hdc_dst);
+    DeleteObject(hbm_src);
+
+    if (!bits) { DeleteObject(hbm_dib); return {}; }
+
+    // BGRA → RGBA 変換しながら vector にコピー
+    const uint8_t* p = static_cast<const uint8_t*>(bits);
+    std::vector<uint8_t> rgba(bw * bh * 4);
+    for (int i = 0; i < bw * bh; ++i) {
+        rgba[i*4+0] = p[i*4+2];  // R ← B
+        rgba[i*4+1] = p[i*4+1];  // G
+        rgba[i*4+2] = p[i*4+0];  // B ← R
+        rgba[i*4+3] = 0xFF;
+    }
+    DeleteObject(hbm_dib);
+
+    // 丸角
+    ApplyRoundedCorners(rgba, bw, bh, max(1, min(bw, bh) / 8));
+    return { std::move(rgba), bw, bh };
 }
 
 static std::vector<uint8_t> MakeCroppedThumbnail(const Image& img, int scale = 8) {
@@ -118,7 +236,6 @@ static void UploadGrey(vr::VROverlayHandle_t overlay) {
 
 // メイン画像をiPad風グレー帯付き・丸角でラップしたテクスチャを返す
 // 上下に bar_h px、左右に side_pad px のグレー帯を追加する
-struct PixelBuffer { std::vector<uint8_t> pixels; int w, h; };
 
 static PixelBuffer MakeMainImageTexture(const Image& img) {
     int bar_h    = max(8,  (int)(img.height * BAR_FRAC));
@@ -384,6 +501,10 @@ void CameraRollUI::LoadImages(const std::filesystem::path& folder) {
 }
 
 void CameraRollUI::PollFolderChanges() {
+    // 直前に重い読み込みがあった場合、1 秒間はフォルダ再読み込みをスキップする。
+    // これにより、連打で UploadNavSlots が終わった直後に PollFolderChanges が
+    // さらに ReloadCurrentDir を発火する連鎖フリーズを防ぐ。
+    if (m_last_load_ms != 0 && GetTickCount64() - m_last_load_ms < 1000) return;
     m_observer.Poll();
 }
 
@@ -455,6 +576,8 @@ void CameraRollUI::RefreshNavItems() {
 }
 
 void CameraRollUI::UploadNavSlots() {
+    m_last_load_ms = GetTickCount64(); // デバウンス用タイムスタンプ更新
+
     // ホバーリセット
     m_hovered_sub_idx = -1;
     constexpr float DIM = 0.35f;
@@ -480,16 +603,30 @@ void CameraRollUI::UploadNavSlots() {
             auto tex = MakeFolderTexture(item.display_name, is_back);
             vr::VROverlay()->SetOverlayRaw(overlay, tex.data(), 64, 64, 4);
         } else {
-            // Image スロット
-            m_slot_images[slot].LoadFromFile(item.path);
-            if (m_slot_images[slot].IsLoaded()) {
-                auto thumb = MakeCroppedThumbnail(m_slot_images[slot], 8);
-                int tw = min(m_slot_images[slot].width,
-                                  m_slot_images[slot].height) / 8;
-                vr::VROverlay()->SetOverlayRaw(overlay, thumb.data(), tw, tw, 4);
-                m_slot_images[slot].Unload(); // テクスチャ転送後にピクセルを解放
+            // Image スロット:
+            // まず Windows サムネイルキャッシュ（高速）を試みる。
+            // キャッシュがなければ stb_image でフォールバック（低速だが確実）。
+            constexpr int THUMB_SIZE = 256;
+            auto win_thumb = GetWinThumbnail(item.path, THUMB_SIZE);
+            if (!win_thumb.pixels.empty()) {
+                vr::VROverlay()->SetOverlayRaw(
+                    overlay, win_thumb.pixels.data(), win_thumb.w, win_thumb.h, 4);
             } else {
-                UploadGrey(overlay);
+                // フォールバック: stb_image でロード → 512px にダウンスケール → サムネイル
+                m_slot_images[slot].LoadFromFile(item.path);
+                if (m_slot_images[slot].IsLoaded()) {
+                    // 最大 512px にダウンスケールしてからサムネイル生成
+                    // （フル解像度でサムネイル計算するより大幅に高速）
+                    DownscaleInPlace(m_slot_images[slot], 512);
+                    int crop = min(m_slot_images[slot].width, m_slot_images[slot].height);
+                    int scale = max(1, crop / 128);  // 目標 ~128px サムネイル
+                    auto thumb = MakeCroppedThumbnail(m_slot_images[slot], scale);
+                    int tw = max(1, crop / scale);
+                    vr::VROverlay()->SetOverlayRaw(overlay, thumb.data(), tw, tw, 4);
+                    m_slot_images[slot].Unload();
+                } else {
+                    UploadGrey(overlay);
+                }
             }
         }
     }
@@ -583,9 +720,14 @@ void CameraRollUI::ReloadCurrentDir() {
 }
 
 void CameraRollUI::SetMainImage(int nav_idx) {
+    m_last_load_ms = GetTickCount64(); // デバウンス用タイムスタンプ更新
+
     m_main_nav_idx = nav_idx;
     m_main_image.LoadFromFile(m_nav_items[nav_idx].path);
     if (m_main_image.IsLoaded()) {
+        // SetOverlayRaw の負荷を抑えるため、最大幅 1920px にダウンスケールする。
+        // VRChat スクリーンショットが 4K の場合でも安全に処理できる。
+        DownscaleInPlace(m_main_image, 1920);
         m_main_image_w = m_main_image.width;
         m_main_image_h = m_main_image.height;
         auto buf = MakeMainImageTexture(m_main_image);
